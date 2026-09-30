@@ -545,8 +545,17 @@ async function generatePdf() {
       updateProgress(index + 1, images.length, `Página ${index + 1} concluída`);
     }
 
-    const pdfBytes = await pdf.save({ useObjectStreams: true, addDefaultPage: false });
-    const blob = new Blob([pdfBytes], { type: "application/pdf" });
+    const pdfBytes = await pdf.save({
+      useObjectStreams: true,
+      addDefaultPage: false
+    });
+
+    const pdfBuffer = new ArrayBuffer(pdfBytes.byteLength);
+    new Uint8Array(pdfBuffer).set(pdfBytes);
+
+    const blob = new Blob([pdfBuffer], {
+        type: "application/pdf"
+    });
     const downloadUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = downloadUrl;
