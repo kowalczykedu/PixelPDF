@@ -60,7 +60,9 @@ Arquivo PDF salvo pelo usuário
 
 Isso vale tanto para a execução local quanto para uma publicação no GitHub Pages. O GitHub Pages hospeda os arquivos da aplicação, enquanto o processamento das imagens acontece no dispositivo do usuário.
 
-## Como executar
+## Como executar localmente
+
+Clone o repositório ou baixe o projeto e, dentro da pasta, execute:
 
 ```bash
 npm install
@@ -77,23 +79,142 @@ http://localhost:5173
 
 ## Build de produção
 
+Para gerar os arquivos otimizados para publicação:
+
 ```bash
 npm run build
 ```
 
-A pasta `dist` será gerada com os arquivos otimizados para publicação.
+A pasta `dist` será criada com a versão pronta para hospedagem.
 
-## GitHub Pages
+Para testar localmente a versão de produção, você também pode usar:
 
-O projeto pode ser publicado no GitHub Pages usando o workflow do GitHub Actions incluído no repositório.
+```bash
+npm run preview
+```
 
-Após o build, a aplicação pode ser acessada por um endereço no formato:
+## Publicação no GitHub Pages
+
+O PixelPDF foi preparado para ser publicado no **GitHub Pages** usando **GitHub Actions**. O repositório contém um workflow em:
+
+```text
+.github/workflows/deploy.yml
+```
+
+Esse workflow instala as dependências, executa o build do Vite e publica automaticamente a pasta `dist` no GitHub Pages.
+
+### 1. Crie um repositório no GitHub
+
+Crie um repositório para o projeto, por exemplo:
+
+```text
+PixelPDF
+```
+
+Depois envie o conteúdo do projeto para a branch `main`.
+
+A estrutura deve ficar diretamente na raiz do repositório:
+
+```text
+PixelPDF/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml
+├── public/
+├── src/
+├── index.html
+├── package.json
+├── package-lock.json
+├── tsconfig.json
+├── tsconfig.app.json
+├── tsconfig.node.json
+├── vite.config.ts
+└── README.md
+```
+
+> **Importante:** o `.github` deve estar na raiz do repositório. Não coloque o projeto inteiro dentro de uma segunda pasta antes de fazer o push.
+
+### 2. Ative o GitHub Pages
+
+No repositório, abra:
+
+**Settings → Pages**
+
+Em **Build and deployment → Source**, selecione:
+
+```text
+GitHub Actions
+```
+
+### 3. Faça o primeiro push
+
+Depois de enviar o projeto para o GitHub, o workflow será iniciado automaticamente.
+
+O processo será aproximadamente:
+
+```text
+git push
+   ↓
+GitHub Actions
+   ↓
+npm install
+   ↓
+npm run build
+   ↓
+criação da pasta dist/
+   ↓
+publicação do artefato
+   ↓
+GitHub Pages
+```
+
+### 4. Acesse o site
+
+Depois que o workflow terminar com sucesso, o site ficará disponível normalmente em:
 
 ```text
 https://SEU_USUARIO.github.io/SEU_REPOSITORIO/
 ```
 
-Mesmo hospedado no GitHub Pages, a conversão continua sendo realizada no navegador do usuário, sem a necessidade de um servidor próprio para processar as imagens.
+Por exemplo:
+
+```text
+https://exemplo.github.io/PixelPDF/
+```
+
+O endereço exato pode ser encontrado em **Settings → Pages** no repositório.
+
+### 5. Atualizações futuras
+
+Depois da configuração inicial, novas versões podem ser publicadas simplesmente fazendo um novo push para a branch `main`:
+
+```bash
+git add .
+git commit -m "Atualiza o PixelPDF"
+git push
+```
+
+O GitHub Actions fará novamente o build e o deploy automaticamente.
+
+### 6. Funcionamento no GitHub Pages
+
+O GitHub Pages é responsável apenas por hospedar os arquivos da aplicação. A conversão das imagens continua acontecendo no navegador do usuário.
+
+Isso significa que, mesmo acessando o PixelPDF por um endereço do GitHub Pages, o fluxo continua sendo:
+
+```text
+Usuário seleciona a imagem
+          ↓
+Imagem permanece no dispositivo
+          ↓
+JavaScript + pdf-lib executam no navegador
+          ↓
+PDF é criado localmente
+          ↓
+Usuário salva o PDF
+```
+
+Não é necessário contratar um servidor/backend para realizar a conversão.
 
 ## Estrutura
 
