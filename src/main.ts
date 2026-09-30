@@ -73,7 +73,7 @@ app.innerHTML = `
           <span id="themeToggleLabel">Tema claro</span>
         </button>
         <button id="aboutButton" class="top-link" type="button">Como funciona</button>
-        <a class="github-link" href="https://github.com" target="_blank" rel="noreferrer">TypeScript + pdf-lib ↗</a>
+        <a class="github-link" href="https://github.com/kowalczykedu/PixelPDF" target="_blank" rel="noreferrer">GitHub ↗</a>
       </div>
     </header>
 
@@ -439,33 +439,102 @@ function getRotatedDimensions(width: number, height: number, rotation: number): 
 }
 
 function drawFitImage(
-  page: ReturnType<PDFDocument["addPage"]>,
-  embedded: Awaited<ReturnType<PDFDocument["embedJpg"]>>,
-  pageWidth: number,
-  pageHeight: number,
-  margin: number,
-  fitMode: FitMode,
-  rotation: number
+    page: ReturnType<PDFDocument["addPage"]>,
+    embedded: Awaited<ReturnType<PDFDocument["embedJpg"]>>,
+    pageWidth: number,
+    pageHeight: number,
+    margin: number,
+    fitMode: FitMode,
+    rotation: number
 ) {
-  const [sourceW, sourceH] = getRotatedDimensions(embedded.width, embedded.height, rotation);
-  const areaW = Math.max(1, pageWidth - margin * 2);
-  const areaH = Math.max(1, pageHeight - margin * 2);
+    const normalizedRotation = ((rotation % 360) + 360) % 360;
 
-  if (fitMode === "stretch") {
-    page.drawImage(embedded, { x: margin, y: margin, width: areaW, height: areaH, rotate: degrees(rotation) });
-    return;
-  }
+    const sourceW = embedded.width;
+    const sourceH = embedded.height;
 
-  const scale = fitMode === "cover"
-    ? Math.max(areaW / sourceW, areaH / sourceH)
-    : Math.min(areaW / sourceW, areaH / sourceH);
+    // Tamanho que a imagem terá depois da rotação
+    const rotatedW =
+        normalizedRotation === 90 || normalizedRotation === 270
+            ? sourceH
+            : sourceW;
 
-  const width = sourceW * scale;
-  const height = sourceH * scale;
-  const x = margin + (areaW - width) / 2;
-  const y = margin + (areaH - height) / 2;
+    const rotatedH =
+        normalizedRotation === 90 || normalizedRotation === 270
+            ? sourceW
+            : sourceH;
 
-  page.drawImage(embedded, { x, y, width, height, rotate: degrees(rotation) });
+    const areaW = Math.max(1, pageWidth - margin * 2);
+    const areaH = Math.max(1, pageHeight - margin * 2);
+
+    let renderedW: number;
+    let renderedH: number;
+
+    if (fitMode === "stretch") {
+        renderedW = areaW;
+        renderedH = areaH;
+    } else {
+        const scale =
+            fitMode === "cover"
+                ? Math.max(areaW / rotatedW, areaH / rotatedH)
+                : Math.min(areaW / rotatedW, areaH / rotatedH);
+
+        renderedW = rotatedW * scale;
+        renderedH = rotatedH * scale;
+    }
+
+    // Posição do retângulo final da imagem dentro da página
+    const targetX = margin + (areaW - renderedW) / 2;
+    const targetY = margin + (areaH - renderedH) / 2;
+
+    /*
+     * O drawImage recebe o tamanho ANTES da rotação.
+     * Por isso, em 90°/270°, width e height precisam
+     * continuar correspondendo à imagem original.
+     */
+    const scaleX = renderedW / rotatedW;
+    const scaleY = renderedH / rotatedH;
+
+    const drawWidth = sourceW * scaleX;
+    const drawHeight = sourceH * scaleY;
+
+    let drawX = targetX;
+    let drawY = targetY;
+
+    /*
+     * Ajusta a origem da transformação para que,
+     * mesmo depois da rotação, o bounding box fique
+     * centralizado na posição calculada.
+     */
+    switch (normalizedRotation) {
+        case 90:
+            drawX = targetX + renderedW;
+            drawY = targetY;
+            break;
+
+        case 180:
+            drawX = targetX + renderedW;
+            drawY = targetY + renderedH;
+            break;
+
+        case 270:
+            drawX = targetX;
+            drawY = targetY + renderedH;
+            break;
+
+        case 0:
+        default:
+            drawX = targetX;
+            drawY = targetY;
+            break;
+    }
+
+    page.drawImage(embedded, {
+        x: drawX,
+        y: drawY,
+        width: drawWidth,
+        height: drawHeight,
+        rotate: degrees(normalizedRotation)
+    });
 }
 
 function qualityConfig(): { jpeg: number; maxDimension: number } {
