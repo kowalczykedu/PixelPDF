@@ -26,6 +26,7 @@ import {
   normalizeRotation
 } from "./utils/layout";
 import { PdfGenerationController } from "./pdf/pdf-client";
+import { initRootsBackground } from "./rootsAnimation";
 
 const ICONS = {
   sun: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`,
@@ -85,6 +86,7 @@ if (!app) throw new Error("Elemento #app não encontrado.");
 
 app.innerHTML = `
   <div class="app-shell">
+    <canvas id="rootsCanvas" class="roots-canvas" aria-hidden="true"></canvas>
     <div class="glow glow-one" aria-hidden="true"></div>
     <div class="glow glow-two" aria-hidden="true"></div>
 
@@ -116,11 +118,6 @@ app.innerHTML = `
             <span>GitHub</span>
             ${ICONS.external}
           </a>
-
-          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Alternar tema">
-            <span class="theme-icon" aria-hidden="true">${ICONS.sun}</span>
-            <span id="themeToggleLabel">Tema claro</span>
-          </button>
         </div>
       </div>
     </header>
@@ -530,8 +527,6 @@ const progressPercent = getElement<HTMLElement>("progressPercent");
 const aboutButton = getElement<HTMLButtonElement>("aboutButton");
 const aboutDialog = getElement<HTMLDialogElement>("aboutDialog");
 const closeDialog = getElement<HTMLButtonElement>("closeDialog");
-const themeToggle = getElement<HTMLButtonElement>("themeToggle");
-const themeToggleLabel = getElement<HTMLElement>("themeToggleLabel");
 
 // Preview Dialog elements
 const previewDialog = getElement<HTMLDialogElement>("previewDialog");
@@ -563,7 +558,6 @@ function loadSettings(): Settings {
     const validOrientations: Orientation[] = ["auto", "portrait", "landscape"];
     const validFitModes: FitMode[] = ["contain", "cover", "stretch"];
     const validQualities: Quality[] = ["high", "balanced", "compact"];
-    const validThemes: Theme[] = ["dark", "light"];
 
     return {
       fileName:
@@ -589,9 +583,7 @@ function loadSettings(): Settings {
       quality: validQualities.includes(saved.quality as Quality)
         ? (saved.quality as Quality)
         : DEFAULT_SETTINGS.quality,
-      theme: validThemes.includes(saved.theme as Theme)
-        ? (saved.theme as Theme)
-        : DEFAULT_SETTINGS.theme
+      theme: "rose-pine"
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -613,23 +605,12 @@ function scheduleSaveSettings(): void {
 }
 
 function applyTheme(): void {
-  document.documentElement.dataset.theme = settings.theme;
-  themeToggleLabel.textContent =
-    settings.theme === "dark" ? "Tema claro" : "Tema escuro";
-  themeToggle.setAttribute(
-    "aria-label",
-    settings.theme === "dark" ? "Ativar tema claro" : "Ativar tema escuro"
-  );
-  const icon = themeToggle.querySelector<HTMLElement>(".theme-icon");
-  if (icon) {
-    icon.innerHTML = settings.theme === "dark" ? ICONS.sun : ICONS.moon;
-  }
-
+  document.documentElement.dataset.theme = "rose-pine";
   const metaThemeColor = document.querySelector<HTMLMetaElement>(
     'meta[name="theme-color"]'
   );
   if (metaThemeColor) {
-    metaThemeColor.content = settings.theme === "dark" ? "#08080c" : "#f6f5fa";
+    metaThemeColor.content = "#191724";
   }
 }
 
@@ -1418,6 +1399,11 @@ applyTheme();
 syncSettingsControls();
 syncDom();
 
+const rootsCanvas = document.querySelector<HTMLCanvasElement>("#rootsCanvas");
+if (rootsCanvas) {
+  initRootsBackground(rootsCanvas);
+}
+
 fileInput.addEventListener("change", () => {
   if (fileInput.files?.length) addFiles(fileInput.files);
   fileInput.value = "";
@@ -1588,14 +1574,6 @@ fitModeInput.addEventListener("change", () =>
 qualityInput.addEventListener("change", () =>
   updateSetting("quality", qualityInput.value as Quality)
 );
-
-themeToggle.addEventListener("click", () => {
-  updateSetting("theme", settings.theme === "dark" ? "light" : "dark");
-  setStatus(
-    `Tema ${settings.theme === "dark" ? "escuro" : "claro"} ativado.`,
-    "info"
-  );
-});
 
 // Preview Modal controls
 closePreviewDialog.addEventListener("click", closePreviewModal);
