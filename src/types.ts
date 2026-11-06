@@ -2,7 +2,7 @@ export type FitMode = "contain" | "cover" | "stretch";
 export type PageSize = "a4" | "a5" | "letter" | "legal" | "image";
 export type Orientation = "auto" | "portrait" | "landscape";
 export type Quality = "high" | "balanced" | "compact";
-export type Theme = "dark" | "light";
+export type Theme = "rose-pine";
 export type SortMode =
   | "manual"
   | "name-asc"
@@ -122,6 +122,6 @@ export const DEFAULT_SETTINGS: Settings = {
   margin: 24,
   fitMode: "contain",
   quality: "high",
-  theme: "dark"
+  theme: "rose-pine"
 };
 
