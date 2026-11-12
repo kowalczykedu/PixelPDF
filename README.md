@@ -1,12 +1,12 @@
-# PixelPDF — Estúdio de Imagem para PDF
+# RootPDF — Seu Estúdio Local de PDF
 
-Aplicação web moderna desenvolvida em **TypeScript + Vite + Web Worker + pdf-lib** para converter imagens em arquivos PDF de alta precisão diretamente no navegador. O processamento ocorre 100% no lado do cliente (sem envio para servidores externos), com prévia fiel das páginas em tempo real, identidade visual exclusiva **Rosé Pine**, tipografia **Space Mono**, animação procedural botânica em Canvas 2D e pronta para publicação no **GitHub Pages**.
+Aplicação web moderna desenvolvida em **TypeScript + Vite + Web Worker + pdf-lib** para trabalhar seus arquivos PDF diretamente no navegador. O processamento ocorre 100% no lado do cliente (sem envio para servidores externos), com prévia fiel das páginas em tempo real, identidade visual exclusiva **Rosé Pine**, tipografia **Space Mono**, animação procedural botânica em Canvas 2D e publicação automática no **GitHub Pages**.
 
 ---
 
 ## Sobre o Projeto
 
-O **PixelPDF** foi projetado para oferecer uma experiência fluida, profissional e absolutamente privada de conversão de imagens em documentos PDF. Ao contrário de ferramentas convencionais que enviam seus arquivos para servidores de terceiros, o PixelPDF realiza toda a decodificação, enquadramento geométrico, compressão e montagem do PDF na memória do seu próprio navegador.
+O **RootPDF** foi pensado para ser o seu estúdio local e privado para lidar com PDFs sem complicação. Em vez de enviar seus documentos para servidores de terceiros, ele realiza toda a decodificação, enquadramento geométrico, compressão e montagem na memória do seu próprio navegador.
 
 O processamento pesado é delegado a um **Web Worker** dedicado com suporte a **OffscreenCanvas**, garantindo que a interface permaneça sempre responsiva (60/120 FPS), sem travamentos mesmo durante a conversão de dezenas de arquivos pesados.
 
@@ -96,8 +96,8 @@ A aplicação conta com uma identidade visual moderna inspirada no tema **Rosé 
 
 ```bash
 # 1. Clone o repositório
-git clone https://github.com/kowalczykedu/PixelPDF.git
-cd PixelPDF
+git clone https://github.com/kowalczykedu/RootPDF.git
+cd RootPDF
 
 # 2. Instale as dependências
 npm install
@@ -128,7 +128,7 @@ npm run preview
 
 ## Publicação no GitHub Pages
 
-O projeto já possui configuração completa de caminhos relativos no [`vite.config.ts`](file:///c:/Users/duduk/Documents/PixelPDF/vite.config.ts) e o pipeline de CI/CD automatizado em [`.github/workflows/deploy.yml`](file:///c:/Users/duduk/Documents/PixelPDF/.github/workflows/deploy.yml):
+O projeto já possui configuração completa de caminhos relativos no [`vite.config.ts`](./vite.config.ts) e o pipeline de CI/CD automatizado em [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml):
 
 1. Envie suas alterações para a branch `main` do GitHub.
 2. No repositório, acesse **Settings → Pages**.
@@ -140,12 +140,14 @@ O projeto já possui configuração completa de caminhos relativos no [`vite.con
 ## Estrutura do Projeto
 
 ```text
-PixelPDF/
+RootPDF/
 ├── .github/
 │   └── workflows/
+│       ├── ci.yml             # CI em Pull Requests (typecheck + build)
 │       └── deploy.yml         # CI/CD automatizado para publicação no GitHub Pages
 ├── public/
-│   └── favicon.png            # Favicon com paleta Rosé Pine
+│   ├── favicon.svg            # Favicon vetorial com paleta Rosé Pine
+│   └── favicon.png            # Favicon PNG com paleta Rosé Pine
 ├── src/
 │   ├── pdf/
 │   │   ├── pdf-builder.ts     # Montagem do PDF, cálculo de enquadramento e clipping
