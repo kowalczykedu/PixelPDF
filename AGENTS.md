@@ -4,7 +4,7 @@ Guia permanente para agentes trabalhando neste repositório. Leia este arquivo e
 
 ## Visão Geral & Stack
 
-- **Projeto:** Conversor web 100% client-side (sem backend; nenhum arquivo do usuário sai do navegador).
+- **Projeto:** **RootPDF** — seu estúdio local de PDF 100% client-side (sem backend; nenhum arquivo do usuário sai do navegador).
 - **Stack:** TypeScript (`strict: true`), Vite 7, `pdf-lib`, Web Worker com `OffscreenCanvas`, HTML5 Canvas 2D e CSS puro com tokens em 3 camadas (tema **Rosé Pine** e fonte **Space Mono**).
 - **Deploy:** Site estático publicado no GitHub Pages via `.github/workflows/deploy.yml` (push em `main`).
 
@@ -18,7 +18,7 @@ Guia permanente para agentes trabalhando neste repositório. Leia este arquivo e
 
 ## Mapa Rápido da Arquitetura
 
-- `index.html` & `public/` — ponto de entrada HTML, carregamento da fonte Space Mono e `favicon.png`.
+- `index.html` & `public/` — ponto de entrada HTML, carregamento da fonte Space Mono e favicons (`favicon.svg`, `favicon.png`).
 - `src/main.ts` — interface principal, estado da aplicação, reconciliação de DOM, modais e atalhos.
 - `src/style.css` — arquitetura de tokens Rosé Pine, layout responsivo e estilos dos componentes.
 - `src/rootsAnimation.ts` — animação procedural de raízes botânicas em Canvas 2D.
