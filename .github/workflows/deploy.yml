@@ -1,4 +1,4 @@
-name: Deploy PixelPDF to GitHub Pages
+name: Deploy RootPDF to GitHub Pages
 
 on:
   push:

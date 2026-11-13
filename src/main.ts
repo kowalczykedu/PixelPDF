@@ -2,6 +2,7 @@ import "./style.css";
 import {
   DEFAULT_SETTINGS,
   PAGE_SIZES,
+  type AppMode,
   type FitMode,
   type ImageItem,
   type Orientation,
@@ -16,9 +17,11 @@ import {
   formatBytes,
   getExtension,
   isAcceptedFile,
+  isPdfUploadFile,
   pointsToMillimeters,
   safeFileName
 } from "./utils/format";
+import { ICONS } from "./utils/icons";
 import { createThumbnailAndDimensions } from "./utils/image";
 import {
   getEffectiveMargin,
@@ -27,36 +30,18 @@ import {
 } from "./utils/layout";
 import { PdfGenerationController } from "./pdf/pdf-client";
 import { initRootsBackground } from "./rootsAnimation";
+import type { PdfCreatorStudio } from "./creator/pdf-creator-studio";
+import type { PdfReaderStudio } from "./reader/pdf-reader-studio";
 
-const ICONS = {
-  sun: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`,
-  moon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`,
-  info: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`,
-  external: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>`,
-  shield: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>`,
-  uploadIllustration: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>`,
-  folderPlus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>`,
-  clipboard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>`,
-  plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`,
-  sort: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M11 4h10"/><path d="M11 8h7"/><path d="M11 12h4"/></svg>`,
-  rotateCcw: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>`,
-  rotateCw: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>`,
-  arrowUpDown: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>`,
-  trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`,
-  grip: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/></svg>`,
-  zoom: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/></svg>`,
-  copy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
-  arrowUp: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg>`,
-  arrowDown: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`,
-  fileText: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>`,
-  cpu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg>`,
-  download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>`,
-  close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-  chevronLeft: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>`,
-  chevronRight: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`,
-  layers: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>`,
-  sliders: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/></svg>`
-} as const;
+const SETTINGS_STORAGE_KEY = "rootpdf-settings";
+const LEGACY_SETTINGS_STORAGE_KEY = "pixelpdf-settings";
+const ACTIVE_MODE_STORAGE_KEY = "rootpdf-active-mode";
+
+let activeMode: AppMode = loadActiveMode();
+let readerStudio: PdfReaderStudio | null = null;
+let readerStudioPromise: Promise<PdfReaderStudio> | null = null;
+let creatorStudio: PdfCreatorStudio | null = null;
+let creatorStudioPromise: Promise<PdfCreatorStudio> | null = null;
 
 let nextId = 1;
 let pasteCounter = 1;
@@ -92,14 +77,13 @@ app.innerHTML = `
 
     <header class="topbar">
       <div class="topbar-inner">
-        <a class="brand" href="#" aria-label="PixelPDF — Estúdio Imagem para PDF">
+        <a class="brand" href="#" aria-label="RootPDF — Seu Estúdio Local de PDF">
           <span class="brand-mark" aria-hidden="true">
-            <span></span>
-            <span></span>
+            ${ICONS.brandMark}
           </span>
           <span class="brand-text">
-            <strong>PixelPDF</strong>
-            <small>ESTÚDIO IMAGEM → PDF</small>
+            <strong>RootPDF</strong>
+            <small>SEU ESTÚDIO LOCAL DE PDF</small>
           </span>
         </a>
 
@@ -114,7 +98,7 @@ app.innerHTML = `
             <span>Como funciona</span>
           </button>
 
-          <a class="github-link" href="https://github.com/kowalczykedu/PixelPDF" target="_blank" rel="noreferrer" aria-label="Repositório no GitHub (abre em nova aba)">
+          <a class="github-link" href="https://github.com/kowalczykedu/RootPDF" target="_blank" rel="noreferrer" aria-label="Repositório no GitHub (abre em nova aba)">
             <span>GitHub</span>
             ${ICONS.external}
           </a>
@@ -123,14 +107,58 @@ app.innerHTML = `
     </header>
 
     <main class="container">
+      <nav class="studio-tabs-wrap" aria-label="Ferramentas do RootPDF">
+        <div class="studio-tabs" role="tablist" aria-label="Modo de trabalho">
+          <button
+            id="tabConverter"
+            class="studio-tab is-active"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="converterPanel"
+            data-mode="converter"
+          >
+            ${ICONS.images}
+            <span>Imagem → PDF</span>
+          </button>
+          <button
+            id="tabReader"
+            class="studio-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="readerPanel"
+            data-mode="reader"
+            tabindex="-1"
+          >
+            ${ICONS.bookOpen}
+            <span>Leitor &amp; Editor</span>
+          </button>
+          <button
+            id="tabCreator"
+            class="studio-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="creatorPanel"
+            data-mode="creator"
+            tabindex="-1"
+          >
+            ${ICONS.filePlus}
+            <span>Criar PDF</span>
+          </button>
+        </div>
+      </nav>
+
+      <div id="converterPanel" class="mode-panel" role="tabpanel" aria-labelledby="tabConverter">
       <section class="hero" aria-label="Apresentação e resumo da sessão">
         <div class="hero-copy">
           <div class="eyebrow">
             <span class="status-dot" aria-hidden="true"></span>
-            <span>Processamento local via Web Worker · Zero travamentos</span>
+            <span>100% no seu navegador · Sem filas nem uploads</span>
           </div>
-          <h1>Converta imagens em <em>PDFs de alta precisão.</em></h1>
-          <p>Organize páginas com pré-visualização fiel da folha em tempo real, calibre margens, orientação e enquadramento, e exporte seu documento sem enviar nenhum arquivo para servidores externos.</p>
+          <h1>Seu estúdio local para <em>PDFs simples e privados.</em></h1>
+          <p>Monte e organize suas páginas com prévia fiel em tempo real, ajuste margens e formato da folha e exporte tudo direto na sua máquina — sem cadastros e sem enviar arquivos para servidores externos.</p>
         </div>
 
         <div class="hero-stats" aria-label="Métricas dos arquivos selecionados">
@@ -394,7 +422,7 @@ app.innerHTML = `
         </aside>
       </section>
 
-      <section class="tips-grid" aria-label="Diferenciais técnicos do PixelPDF">
+      <section class="tips-grid" aria-label="Diferenciais do RootPDF">
         <article class="tip">
           <span class="tip-icon" aria-hidden="true">${ICONS.layers}</span>
           <div>
@@ -417,12 +445,16 @@ app.innerHTML = `
           </div>
         </article>
       </section>
+      </div>
+
+      <div id="readerPanel" class="mode-panel" role="tabpanel" aria-labelledby="tabReader" hidden></div>
+      <div id="creatorPanel" class="mode-panel" role="tabpanel" aria-labelledby="tabCreator" hidden></div>
 
       <footer class="app-footer">
         <div class="footer-inner">
-          <span><strong>PixelPDF</strong> — Conversor Local de Imagens para PDF</span>
+          <span><strong>RootPDF</strong> — Seu Estúdio Local de PDF</span>
           <span class="footer-sep" aria-hidden="true">•</span>
-          <span>TypeScript + Web Worker + <span>pdf-lib</span></span>
+          <span>TypeScript + Web Worker + <span>pdf-lib</span> + <span>PDF.js</span></span>
         </div>
       </footer>
     </main>
@@ -475,26 +507,33 @@ app.innerHTML = `
     </div>
   </dialog>
 
-  <dialog id="aboutDialog" class="about-dialog" aria-label="Sobre o funcionamento do PixelPDF">
+  <dialog id="aboutDialog" class="about-dialog" aria-label="Sobre o funcionamento do RootPDF">
     <div class="dialog-card">
       <button id="closeDialog" class="dialog-close" type="button" aria-label="Fechar janela sobre o projeto" title="Fechar (Esc)">
         ${ICONS.close}
       </button>
       <span class="eyebrow">Arquitetura &amp; Privacidade</span>
-      <h2>Como o PixelPDF funciona?</h2>
-      <p>As imagens selecionadas são decodificadas e redimensionadas em segundo plano (via <strong>Web Worker</strong> e <strong>OffscreenCanvas</strong>) e diagramadas em páginas vetoriais com <strong>pdf-lib</strong>, mantendo a interface sempre responsiva.</p>
+      <h2>Como o RootPDF funciona?</h2>
+      <p>Tudo acontece no seu próprio navegador. Imagens viram PDFs em segundo plano (via <strong>Web Worker</strong> e <strong>OffscreenCanvas</strong>), e você também pode ler, assinar, preencher formulários, editar em camadas ou criar novos PDFs localmente com <strong>PDF.js</strong> e <strong>pdf-lib</strong>.</p>
       <div class="dialog-grid">
         <span>01</span>
-        <p><strong>Importe ou Cole com Rapidez</strong><br>Arraste múltiplos arquivos, selecione do dispositivo ou pressione <kbd>Ctrl+V</kbd> para colar capturas de tela.</p>
+        <p><strong>Imagem → PDF com Rapidez</strong><br>Arraste múltiplos arquivos, selecione do dispositivo ou pressione <kbd>Ctrl+V</kbd> para colar capturas e montar páginas configuráveis.</p>
         <span>02</span>
-        <p><strong>Diagramação Visual em Tempo Real</strong><br>Reordene, duplique, gire e clique em qualquer miniatura para inspecionar margens e cortes em alta resolução.</p>
+        <p><strong>Leitor, Assinatura &amp; Edição</strong><br>Abra PDFs multi-página com busca (<kbd>Ctrl+F</kbd>), assinatura desenhada/enviada/salva localmente, formulários, cobertura e reordenação.</p>
         <span>03</span>
-        <p><strong>Exportação Local Instantânea</strong><br>Gere PDFs otimizados diretamente no seu navegador, com total privacidade e zero envio de dados para a nuvem.</p>
+        <p><strong>Criar PDF do Zero</strong><br>Monte novos documentos combinando blocos de texto formatado, imagens e assinaturas, com rascunho salvo no navegador.</p>
       </div>
     </div>
   </dialog>
 `;
 
+const tabConverter = getElement<HTMLButtonElement>("tabConverter");
+const tabReader = getElement<HTMLButtonElement>("tabReader");
+const tabCreator = getElement<HTMLButtonElement>("tabCreator");
+const converterPanel = getElement<HTMLDivElement>("converterPanel");
+const readerPanel = getElement<HTMLDivElement>("readerPanel");
+const creatorPanel = getElement<HTMLDivElement>("creatorPanel");
+const studioTabList = tabConverter.closest<HTMLElement>("[role='tablist']");
 const fileInput = getElement<HTMLInputElement>("fileInput");
 const pasteButton = getElement<HTMLButtonElement>("pasteButton");
 const dropZone = getElement<HTMLDivElement>("dropZone");
@@ -548,9 +587,169 @@ function getElement<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
+function loadActiveMode(): AppMode {
+  try {
+    const saved = sessionStorage.getItem(ACTIVE_MODE_STORAGE_KEY);
+    if (saved === "converter" || saved === "reader" || saved === "creator") {
+      return saved;
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+  return "converter";
+}
+
+function saveActiveMode(mode: AppMode): void {
+  try {
+    sessionStorage.setItem(ACTIVE_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+async function ensureReaderStudio(): Promise<PdfReaderStudio> {
+  if (readerStudio) return readerStudio;
+  if (!readerStudioPromise) {
+    readerPanel.innerHTML = `
+      <div class="panel reader-loading-panel" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>Carregando Leitor &amp; Organizador de PDF...</span>
+      </div>
+    `;
+    readerStudioPromise = import("./reader/pdf-reader-studio")
+      .then(({ PdfReaderStudio: StudioClass }) => {
+        const instance = new StudioClass(readerPanel);
+        readerStudio = instance;
+        return instance;
+      })
+      .catch((error) => {
+        readerStudioPromise = null;
+        throw error;
+      });
+  }
+  return readerStudioPromise;
+}
+
+async function ensureCreatorStudio(): Promise<PdfCreatorStudio> {
+  if (creatorStudio) return creatorStudio;
+  if (!creatorStudioPromise) {
+    creatorPanel.innerHTML = `
+      <div class="panel reader-loading-panel" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>Carregando Compositor de PDF...</span>
+      </div>
+    `;
+    creatorStudioPromise = import("./creator/pdf-creator-studio")
+      .then(({ PdfCreatorStudio: StudioClass }) => {
+        const instance = new StudioClass(creatorPanel, {
+          onOpenPdfInReader: (file) => {
+            void switchMode("reader", [file]);
+          }
+        });
+        creatorStudio = instance;
+        return instance;
+      })
+      .catch((error) => {
+        creatorStudioPromise = null;
+        throw error;
+      });
+  }
+  return creatorStudioPromise;
+}
+
+async function switchMode(
+  mode: AppMode,
+  initialPdfFiles?: File[]
+): Promise<void> {
+  if (mode !== "converter" && previewDialog.open) {
+    closePreviewModal();
+  }
+
+  activeMode = mode;
+  saveActiveMode(mode);
+
+  const isConverter = mode === "converter";
+  const isReader = mode === "reader";
+  const isCreator = mode === "creator";
+
+  tabConverter.classList.toggle("is-active", isConverter);
+  tabConverter.setAttribute("aria-selected", String(isConverter));
+  tabConverter.tabIndex = isConverter ? 0 : -1;
+
+  tabReader.classList.toggle("is-active", isReader);
+  tabReader.setAttribute("aria-selected", String(isReader));
+  tabReader.tabIndex = isReader ? 0 : -1;
+
+  tabCreator.classList.toggle("is-active", isCreator);
+  tabCreator.setAttribute("aria-selected", String(isCreator));
+  tabCreator.tabIndex = isCreator ? 0 : -1;
+
+  converterPanel.hidden = !isConverter;
+  readerPanel.hidden = !isReader;
+  creatorPanel.hidden = !isCreator;
+
+  readerStudio?.setActive(isReader);
+  creatorStudio?.setActive(isCreator);
+
+  if (isConverter) {
+    return;
+  }
+
+  if (isReader) {
+    try {
+      const studio = await ensureReaderStudio();
+      if (activeMode !== "reader") {
+        studio.setActive(false);
+        return;
+      }
+      studio.setActive(true);
+      if (initialPdfFiles && initialPdfFiles.length > 0) {
+        await studio.openExternalFiles(initialPdfFiles);
+      }
+    } catch (error) {
+      console.error("Erro ao inicializar o Leitor & Editor:", error);
+      readerPanel.innerHTML = `
+        <div class="panel reader-loading-panel is-error" role="alert">
+          <span>Não foi possível carregar o módulo de leitura de PDF. Recarregue a página e tente novamente.</span>
+        </div>
+      `;
+    }
+    return;
+  }
+
+  if (isCreator) {
+    try {
+      const studio = await ensureCreatorStudio();
+      if (activeMode !== "creator") {
+        studio.setActive(false);
+        return;
+      }
+      studio.setActive(true);
+    } catch (error) {
+      console.error("Erro ao inicializar o Compositor de PDF:", error);
+      creatorPanel.innerHTML = `
+        <div class="panel reader-loading-panel is-error" role="alert">
+          <span>Não foi possível carregar o módulo de criação de PDF. Recarregue a página e tente novamente.</span>
+        </div>
+      `;
+    }
+  }
+}
+
 function loadSettings(): Settings {
   try {
-    const raw = localStorage.getItem("pixelpdf-settings");
+    let raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem(LEGACY_SETTINGS_STORAGE_KEY);
+      if (raw) {
+        try {
+          localStorage.setItem(SETTINGS_STORAGE_KEY, raw);
+          localStorage.removeItem(LEGACY_SETTINGS_STORAGE_KEY);
+        } catch {
+          // Ignore storage quota errors during migration
+        }
+      }
+    }
     if (!raw) return { ...DEFAULT_SETTINGS };
     const saved = JSON.parse(raw) as Partial<Settings>;
 
@@ -597,7 +796,7 @@ function scheduleSaveSettings(): void {
   saveSettingsTimer = window.setTimeout(() => {
     saveSettingsTimer = null;
     try {
-      localStorage.setItem("pixelpdf-settings", JSON.stringify(settings));
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
     } catch {
       // Ignore storage quota errors
     }
@@ -904,8 +1103,20 @@ function addFiles(
   const candidates = Array.from(fileList);
   if (!candidates.length) return;
 
-  const valid = candidates.filter(isAcceptedFile);
-  const rejected = candidates.filter((file) => !isAcceptedFile(file));
+  const pdfCandidates = candidates.filter(isPdfUploadFile);
+  const nonPdfCandidates = candidates.filter((file) => !isPdfUploadFile(file));
+
+  if (pdfCandidates.length > 0 && nonPdfCandidates.length === 0) {
+    setStatus(
+      "Arquivo(s) PDF detectado(s). Abrindo no Leitor & Organizador...",
+      "info"
+    );
+    void switchMode("reader", pdfCandidates);
+    return;
+  }
+
+  const valid = nonPdfCandidates.filter(isAcceptedFile);
+  const rejected = nonPdfCandidates.filter((file) => !isAcceptedFile(file));
 
   const fingerprints = new Set(
     images.map(
@@ -943,15 +1154,35 @@ function addFiles(
       applySortInPlace(currentSort);
     }
     const prefix = options.sourceLabel ? `${options.sourceLabel}: ` : "";
+    const pdfNotice =
+      pdfCandidates.length > 0
+        ? ` (${pdfCandidates.length} PDF encaminhado(s) para o Leitor & Organizador)`
+        : "";
     setStatus(
-      `${prefix}${addedItems.length} arquivo(s) adicionado(s).`,
+      `${prefix}${addedItems.length} arquivo(s) adicionado(s).${pdfNotice}`,
       "success"
     );
     flashDropZoneState("success");
     syncDom();
     void hydrateItemsAsync(addedItems);
+    if (pdfCandidates.length > 0) {
+      void ensureReaderStudio().then((studio) =>
+        studio.openExternalFiles(pdfCandidates)
+      );
+    }
   } else if (valid.length > 0) {
     setStatus("Esses arquivos já estão na lista.", "info");
+    if (pdfCandidates.length > 0) {
+      void ensureReaderStudio().then((studio) =>
+        studio.openExternalFiles(pdfCandidates)
+      );
+    }
+  } else if (pdfCandidates.length > 0) {
+    setStatus(
+      "Arquivo(s) PDF detectado(s). Abrindo no Leitor & Organizador...",
+      "info"
+    );
+    void switchMode("reader", pdfCandidates);
   } else if (rejected.length > 0) {
     setStatus("Nenhum formato de imagem compatível foi encontrado.", "error");
     flashDropZoneState("error");
@@ -1398,6 +1629,46 @@ async function handlePasteButtonClick(): Promise<void> {
 applyTheme();
 syncSettingsControls();
 syncDom();
+if (activeMode === "reader" || activeMode === "creator") {
+  void switchMode(activeMode);
+}
+
+tabConverter.addEventListener("click", () => {
+  void switchMode("converter");
+});
+
+tabReader.addEventListener("click", () => {
+  void switchMode("reader");
+});
+
+tabCreator.addEventListener("click", () => {
+  void switchMode("creator");
+});
+
+studioTabList?.addEventListener("keydown", (event: KeyboardEvent) => {
+  const tabs = [tabConverter, tabReader, tabCreator];
+  const currentIndex = tabs.indexOf(document.activeElement as HTMLButtonElement);
+  if (currentIndex === -1) return;
+
+  let nextIndex = -1;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    nextIndex = (currentIndex + 1) % tabs.length;
+  } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = tabs.length - 1;
+  }
+
+  if (nextIndex !== -1) {
+    event.preventDefault();
+    const targetTab = tabs[nextIndex];
+    targetTab.focus();
+    const modes: AppMode[] = ["converter", "reader", "creator"];
+    void switchMode(modes[nextIndex] ?? "converter");
+  }
+});
 
 const rootsCanvas = document.querySelector<HTMLCanvasElement>("#rootsCanvas");
 if (rootsCanvas) {
@@ -1414,6 +1685,8 @@ pasteButton.addEventListener("click", () => {
 });
 
 window.addEventListener("paste", (event: ClipboardEvent) => {
+  if (activeMode !== "converter") return;
+  if (aboutDialog.open || previewDialog.open) return;
   const pastedFiles = extractFilesFromClipboardData(event.clipboardData);
   if (pastedFiles.length > 0) {
     event.preventDefault();

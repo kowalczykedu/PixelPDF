@@ -34,8 +34,8 @@ export async function buildPdfDocument(
 
   const pdf = await PDFDocument.create();
   pdf.setTitle(settings.fileName.trim() || "Meu documento");
-  pdf.setCreator("PixelPDF • TypeScript + pdf-lib");
-  pdf.setProducer("PixelPDF");
+  pdf.setCreator("RootPDF • TypeScript + pdf-lib");
+  pdf.setProducer("RootPDF");
   pdf.setSubject("PDF criado a partir de imagens");
 
   for (let index = 0; index < pages.length; index++) {
