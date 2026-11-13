@@ -1,7 +1,13 @@
 import type { PDFDocumentProxy, RenderTask, TextLayer } from "pdfjs-dist";
 import {
+  type AcroFormFieldValue,
+  type AcroFormWidgetInfo,
+  type EditorToolMode,
+  type ExportableOverlayItem,
   type MergePageInput,
   type MergeSourceInput,
+  type OverlayAssetInput,
+  type PageOverlayItem,
   type ReaderPageItem,
   type ReaderZoomMode
 } from "../types";
@@ -12,8 +18,20 @@ import {
   safeFileName
 } from "../utils/format";
 import { ICONS } from "../utils/icons";
-import { normalizeRotation } from "../utils/layout";
+import {
+  normalizeRotation,
+  transformOverlayOnPageRotate
+} from "../utils/layout";
 import { PdfMergeController } from "../pdf/pdf-merge-client";
+import { extractAcroFormWidgets } from "../editor/acroform-extractor";
+import {
+  dataUrlToAssetBytes,
+  nextAssetId,
+  normalizeImageFileToAsset
+} from "../editor/image-asset-helper";
+import { OverlayInspectorBar } from "../editor/inspector-bar";
+import { PageOverlayLayer } from "../editor/page-overlay-editor";
+import { SignatureLibraryDialog } from "../editor/signature-modal";
 import { loadPdfJs, openPdfFromBuffer } from "./pdfjs-loader";
 import {
   PdfTextSearchIndex,
@@ -195,6 +213,25 @@ export class PdfReaderStudio {
   private loadingBadge!: HTMLElement;
   private pageMetaEl!: HTMLElement;
 
+  // Editor, Signature & AcroForm state
+  private toolMode: EditorToolMode = "select";
+  private pageOverlays = new Map<number, PageOverlayItem[]>();
+  private assetBuffers = new Map<string, OverlayAssetInput>();
+  private overlayUndoStack: Array<{ pageId: number; snapshot: PageOverlayItem[] }> = [];
+  private selectedOverlayId: string | null = null;
+  private formValuesByDoc = new Map<number, Record<string, AcroFormFieldValue>>();
+  private currentAcroWidgets: AcroFormWidgetInfo[] = [];
+
+  private editorToolbar!: HTMLElement;
+  private toolButtons: HTMLButtonElement[] = [];
+  private imageOverlayInput!: HTMLInputElement;
+  private formStatusPill!: HTMLElement;
+  private inspectorHost!: HTMLElement;
+  private flattenOutputCheck!: HTMLInputElement;
+  private overlayLayer!: PageOverlayLayer;
+  private inspectorBar!: OverlayInspectorBar;
+  private signatureModal!: SignatureLibraryDialog;
+
   // Password Dialog
   private passwordDialog!: HTMLDialogElement;
   private passwordFileEl!: HTMLElement;
@@ -207,6 +244,7 @@ export class PdfReaderStudio {
     this.host = host;
     this.renderMarkup();
     this.bindElements();
+    this.setupEditorModules();
     this.setupObservers();
     this.bindEvents();
     this.syncControls();
@@ -226,7 +264,7 @@ export class PdfReaderStudio {
   }
 
   public isModalOpen(): boolean {
-    return this.passwordDialog.open;
+    return this.passwordDialog.open || this.signatureModal.isOpen();
   }
 
   public async openExternalFiles(files: FileList | File[]): Promise<void> {
@@ -277,10 +315,10 @@ export class PdfReaderStudio {
               </div>
               <p>Carregue documentos para leitura em alta nitidez, extração de texto e organização de páginas — tudo na memória local.</p>
               <div class="format-pills" aria-label="Recursos disponíveis no módulo">
-                <span class="format-pill">PDF</span>
-                <span class="format-pill">Miniaturas</span>
-                <span class="format-pill">Seleção de texto</span>
-                <span class="format-pill">Mesclar &amp; Girar</span>
+                <span class="format-pill">Assinar PDF</span>
+                <span class="format-pill">Editar em camadas</span>
+                <span class="format-pill">Formulários AcroForm</span>
+                <span class="format-pill">Busca &amp; Mesclar</span>
               </div>
             </div>
 
@@ -369,6 +407,43 @@ export class PdfReaderStudio {
           </div>
         </div>
 
+        <div id="readerEditorToolbar" class="reader-editor-toolbar panel" role="toolbar" aria-label="Ferramentas de assinatura e edição em camadas">
+          <div class="editor-tool-group">
+            <button type="button" class="button ghost compact-btn is-tool-active" data-editor-tool="select" aria-pressed="true" title="Selecionar texto do PDF, preencher formulários ou ajustar elementos">
+              ${ICONS.cursor}
+              <span>Selecionar / Ler</span>
+            </button>
+            <button type="button" class="button ghost compact-btn" data-editor-tool="signature" aria-pressed="false" title="Desenhar, enviar ou reutilizar assinatura salva">
+              ${ICONS.signature}
+              <span>Assinar</span>
+            </button>
+            <button type="button" class="button ghost compact-btn" data-editor-tool="text" aria-pressed="false" title="Clique ou arraste na folha para inserir texto">
+              ${ICONS.typeText}
+              <span>Texto</span>
+            </button>
+            <button type="button" class="button ghost compact-btn" data-editor-tool="image" aria-pressed="false" title="Inserir imagem PNG, JPG ou SVG na página atual">
+              ${ICONS.imagePlus}
+              <span>Imagem</span>
+            </button>
+            <button type="button" class="button ghost compact-btn" data-editor-tool="redact" aria-pressed="false" title="Cobrir texto/área e opcionalmente escrever por cima">
+              ${ICONS.eraser}
+              <span>Cobrir / Substituir</span>
+            </button>
+            <button type="button" class="button ghost compact-btn" data-editor-tool="highlight" aria-pressed="false" title="Arraste para destacar uma região do documento">
+              ${ICONS.highlighter}
+              <span>Destaque</span>
+            </button>
+            <input id="readerOverlayImageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.avif,.svg,image/*" hidden />
+          </div>
+
+          <span id="readerFormStatusPill" class="reader-form-pill" hidden>
+            ${ICONS.forms}
+            <span>Formulário editável nesta página</span>
+          </span>
+        </div>
+
+        <div id="readerInspectorHost" class="reader-inspector-host panel"></div>
+
         <div id="readerSearchBar" class="reader-search-bar panel" role="search" aria-label="Busca de texto no documento PDF" hidden>
           <div class="reader-search-input-wrap">
             <span class="search-prefix-icon" aria-hidden="true">${ICONS.search}</span>
@@ -433,6 +508,11 @@ export class PdfReaderStudio {
                   </span>
                   <input id="readerExportName" type="text" maxlength="80" placeholder="documento-organizado" spellcheck="false" />
                 </div>
+              </label>
+
+              <label class="reader-flatten-row" for="readerFlattenCheck" title="Consolida campos de formulário como texto definitivo ao exportar (recomendado ao mesclar ou enviar)">
+                <input id="readerFlattenCheck" type="checkbox" />
+                <span>Achatar formulários no PDF final</span>
               </label>
 
               <div id="readerExportProgress" class="progress-wrap" hidden>
@@ -546,6 +626,7 @@ export class PdfReaderStudio {
     this.reverseOrderBtn = this.el("readerReverseBtn");
     this.clearBtn = this.el("readerClearBtn");
     this.exportNameInput = this.el("readerExportName");
+    this.flattenOutputCheck = this.el("readerFlattenCheck");
     this.exportBtn = this.el("readerExportBtn");
     this.exportCancelBtn = this.el("readerExportCancelBtn");
     this.exportProgressWrap = this.el("readerExportProgress");
@@ -554,6 +635,14 @@ export class PdfReaderStudio {
     this.exportProgressPercent = this.el("readerExportProgressPercent");
     this.statusEl = this.el("readerStatus");
     this.introStatusEl = this.el("readerIntroStatus");
+
+    this.editorToolbar = this.el("readerEditorToolbar");
+    this.toolButtons = Array.from(
+      this.editorToolbar.querySelectorAll<HTMLButtonElement>("[data-editor-tool]")
+    );
+    this.imageOverlayInput = this.el("readerOverlayImageInput");
+    this.formStatusPill = this.el("readerFormStatusPill");
+    this.inspectorHost = this.el("readerInspectorHost");
 
     this.stage = this.el("readerStage");
     this.pageFrame = this.el("readerPageFrame");
@@ -568,6 +657,430 @@ export class PdfReaderStudio {
     this.passwordForm = this.el("pdfPasswordForm");
     this.passwordInput = this.el("pdfPasswordInput");
     this.passwordCancelBtn = this.el("pdfPasswordCancelBtn");
+  }
+
+  private pendingUndoSnapshot: { pageId: number; snapshot: PageOverlayItem[] } | null = null;
+
+  private cloneOverlays(list: PageOverlayItem[]): PageOverlayItem[] {
+    return list.map((item) => ({ ...item }));
+  }
+
+  private pushUndoSnapshot(pageId: number, snapshot: PageOverlayItem[]): void {
+    this.overlayUndoStack.push({
+      pageId,
+      snapshot: this.cloneOverlays(snapshot)
+    });
+    if (this.overlayUndoStack.length > 40) {
+      this.overlayUndoStack.shift();
+    }
+  }
+
+  private setupEditorModules(): void {
+    this.signatureModal = new SignatureLibraryDialog(this.host);
+
+    this.overlayLayer = new PageOverlayLayer({
+      hostFrame: this.pageFrame,
+      onSelect: (id) => {
+        this.selectedOverlayId = id;
+        this.syncEditorUi();
+      },
+      onMutate: (items, commit) => {
+        if (this.selectedPageId === null) return;
+        const pageId = this.selectedPageId;
+        if (!commit) {
+          if (!this.pendingUndoSnapshot || this.pendingUndoSnapshot.pageId !== pageId) {
+            this.pendingUndoSnapshot = {
+              pageId,
+              snapshot: this.cloneOverlays(this.pageOverlays.get(pageId) ?? [])
+            };
+          }
+          this.pageOverlays.set(pageId, items);
+          this.syncEditorInspectorOnly();
+          return;
+        }
+
+        if (this.pendingUndoSnapshot && this.pendingUndoSnapshot.pageId === pageId) {
+          this.pushUndoSnapshot(pageId, this.pendingUndoSnapshot.snapshot);
+          this.pendingUndoSnapshot = null;
+        } else {
+          this.pushUndoSnapshot(pageId, this.pageOverlays.get(pageId) ?? []);
+        }
+        this.pageOverlays.set(pageId, items);
+        this.syncEditorUi();
+        this.syncThumbSelectionAndActions();
+      },
+      onDelete: (id) => this.deleteOverlayById(id),
+      onCreateAt: (normRect) => this.createOverlayForToolAt(normRect),
+      onAcroFormChange: (fieldName, value) => {
+        const currentPage = this.pages.find((p) => p.id === this.selectedPageId);
+        if (!currentPage) return;
+        const docValues = this.formValuesByDoc.get(currentPage.sourceDocId) ?? {};
+        docValues[fieldName] = value;
+        this.formValuesByDoc.set(currentPage.sourceDocId, docValues);
+      }
+    });
+
+    this.inspectorBar = new OverlayInspectorBar(this.inspectorHost, {
+      onPatchSelected: (patch, commit = true) => {
+        if (this.selectedPageId === null || !this.selectedOverlayId) return;
+        const pageId = this.selectedPageId;
+        const current = this.pageOverlays.get(pageId) ?? [];
+
+        if (!commit) {
+          if (!this.pendingUndoSnapshot || this.pendingUndoSnapshot.pageId !== pageId) {
+            this.pendingUndoSnapshot = {
+              pageId,
+              snapshot: this.cloneOverlays(current)
+            };
+          }
+        } else if (this.pendingUndoSnapshot && this.pendingUndoSnapshot.pageId === pageId) {
+          this.pushUndoSnapshot(pageId, this.pendingUndoSnapshot.snapshot);
+          this.pendingUndoSnapshot = null;
+        } else {
+          this.pushUndoSnapshot(pageId, current);
+        }
+
+        const next = current.map((o) =>
+          o.id === this.selectedOverlayId ? ({ ...o, ...patch } as PageOverlayItem) : o
+        );
+        this.pageOverlays.set(pageId, next);
+        this.overlayLayer.setState({
+          items: next,
+          selectedId: this.selectedOverlayId
+        });
+        if (commit) {
+          this.syncEditorInspectorOnly();
+          this.syncThumbSelectionAndActions();
+        }
+      },
+      onStartEditSelected: () => {
+        if (this.selectedOverlayId) {
+          this.overlayLayer.startInlineEdit(this.selectedOverlayId);
+        }
+      },
+      onDeleteSelected: () => {
+        if (this.selectedOverlayId) {
+          this.deleteOverlayById(this.selectedOverlayId);
+        }
+      },
+      onUndo: () => this.undoLastOverlayEdit(),
+      onClearPage: () => this.clearOverlaysOnCurrentPage()
+    });
+  }
+
+  private setToolMode(mode: EditorToolMode): void {
+    if (mode === "signature") {
+      if (this.selectedPageId === null) return;
+      this.signatureModal.open((sig) => {
+        this.insertSignatureOnPage(sig.label, sig.dataUrl, sig.aspectRatio);
+      });
+      return;
+    }
+
+    if (mode === "image") {
+      if (this.selectedPageId === null) return;
+      this.imageOverlayInput.click();
+      return;
+    }
+
+    this.toolMode = mode;
+    if (mode !== "select") {
+      this.overlayLayer.stopInlineEdit();
+    }
+    this.syncEditorUi();
+  }
+
+  private insertSignatureOnPage(
+    label: string,
+    dataUrl: string,
+    aspectRatio: number
+  ): void {
+    const pageItem = this.pages.find((p) => p.id === this.selectedPageId);
+    if (!pageItem) return;
+
+    const current = this.pageOverlays.get(pageItem.id) ?? [];
+    this.pushUndoSnapshot(pageItem.id, current);
+
+    const widthNorm = 0.28;
+    const pageAspect = Math.max(0.2, pageItem.widthPt) / Math.max(0.2, pageItem.heightPt);
+    const heightNorm = Math.min(0.45, Math.max(0.05, (widthNorm * pageAspect) / Math.max(0.3, aspectRatio)));
+    const assetId = nextAssetId("sig");
+
+    try {
+      const asset = dataUrlToAssetBytes(dataUrl);
+      this.assetBuffers.set(assetId, { assetId, ...asset });
+    } catch {
+      // Fallback: will decode on export if needed
+    }
+
+    const overlay: PageOverlayItem = {
+      id: nextAssetId("ov"),
+      kind: "signature",
+      assetId,
+      label,
+      dataUrl,
+      xNorm: Math.max(0.05, 0.5 - widthNorm / 2),
+      yNorm: Math.max(0.05, 0.78 - heightNorm / 2),
+      widthNorm,
+      heightNorm,
+      rotationDeg: 0,
+      opacity: 1
+    };
+
+    const next = [...current, overlay];
+    this.pageOverlays.set(pageItem.id, next);
+    this.selectedOverlayId = overlay.id;
+    this.toolMode = "select";
+    this.syncEditorUi();
+    this.syncThumbSelectionAndActions();
+    this.setStatus(`Assinatura "${label}" inserida na página atual. Arraste para posicionar.`, "success");
+  }
+
+  private async handleOverlayImageSelected(file: File): Promise<void> {
+    const pageItem = this.pages.find((p) => p.id === this.selectedPageId);
+    if (!pageItem) return;
+
+    try {
+      const normalized = await normalizeImageFileToAsset(file);
+      this.assetBuffers.set(normalized.assetId, {
+        assetId: normalized.assetId,
+        mimeType: normalized.mimeType,
+        bytes: normalized.bytes
+      });
+
+      const current = this.pageOverlays.get(pageItem.id) ?? [];
+      this.pushUndoSnapshot(pageItem.id, current);
+
+      const widthNorm = 0.32;
+      const imgAspect = normalized.width / Math.max(1, normalized.height);
+      const pageAspect = Math.max(0.2, pageItem.widthPt) / Math.max(0.2, pageItem.heightPt);
+      const heightNorm = Math.min(0.65, Math.max(0.06, (widthNorm * pageAspect) / imgAspect));
+
+      const overlay: PageOverlayItem = {
+        id: nextAssetId("ov"),
+        kind: "image",
+        assetId: normalized.assetId,
+        fileName: normalized.fileName,
+        dataUrl: normalized.dataUrl,
+        xNorm: Math.max(0.05, 0.5 - widthNorm / 2),
+        yNorm: Math.max(0.05, 0.5 - heightNorm / 2),
+        widthNorm,
+        heightNorm,
+        rotationDeg: 0,
+        opacity: 1
+      };
+
+      const next = [...current, overlay];
+      this.pageOverlays.set(pageItem.id, next);
+      this.selectedOverlayId = overlay.id;
+      this.toolMode = "select";
+      this.syncEditorUi();
+      this.syncThumbSelectionAndActions();
+      this.setStatus(`Imagem "${normalized.fileName}" adicionada sobre a página.`, "success");
+    } catch (error) {
+      this.setStatus(
+        error instanceof Error ? error.message : "Erro ao inserir imagem na página.",
+        "error"
+      );
+    }
+  }
+
+  private createOverlayForToolAt(rect: {
+    xNorm: number;
+    yNorm: number;
+    widthNorm: number;
+    heightNorm: number;
+  }): PageOverlayItem | null {
+    if (this.selectedPageId === null) return null;
+    const pageId = this.selectedPageId;
+    const current = this.pageOverlays.get(pageId) ?? [];
+    this.pushUndoSnapshot(pageId, current);
+
+    const isDragDrawn = rect.widthNorm > 0 && rect.heightNorm > 0;
+
+    let created: PageOverlayItem | null = null;
+    if (this.toolMode === "text") {
+      const w = isDragDrawn ? rect.widthNorm : 0.34;
+      const h = isDragDrawn ? rect.heightNorm : 0.08;
+      created = {
+        id: nextAssetId("ov"),
+        kind: "text",
+        xNorm: isDragDrawn ? rect.xNorm : Math.max(0.04, Math.min(1 - w, rect.xNorm - w / 2)),
+        yNorm: isDragDrawn ? rect.yNorm : Math.max(0.04, Math.min(1 - h, rect.yNorm - h / 2)),
+        widthNorm: w,
+        heightNorm: h,
+        rotationDeg: 0,
+        text: "",
+        fontFamily: "helvetica",
+        fontSizePt: 14,
+        color: "#111827",
+        bold: false,
+        italic: false,
+        align: "left",
+        backgroundColor: null
+      };
+    } else if (this.toolMode === "redact") {
+      const w = isDragDrawn ? rect.widthNorm : 0.36;
+      const h = isDragDrawn ? rect.heightNorm : 0.055;
+      created = {
+        id: nextAssetId("ov"),
+        kind: "redact",
+        xNorm: isDragDrawn ? rect.xNorm : Math.max(0.04, Math.min(1 - w, rect.xNorm - w / 2)),
+        yNorm: isDragDrawn ? rect.yNorm : Math.max(0.04, Math.min(1 - h, rect.yNorm - h / 2)),
+        widthNorm: w,
+        heightNorm: h,
+        rotationDeg: 0,
+        coverColor: "#ffffff",
+        replacementText: "",
+        textColor: "#111827",
+        fontFamily: "helvetica",
+        fontSizePt: 12,
+        bold: false,
+        italic: false,
+        align: "left"
+      };
+    } else if (this.toolMode === "highlight") {
+      const w = isDragDrawn ? rect.widthNorm : 0.32;
+      const h = isDragDrawn ? rect.heightNorm : 0.036;
+      created = {
+        id: nextAssetId("ov"),
+        kind: "highlight",
+        xNorm: isDragDrawn ? rect.xNorm : Math.max(0.04, Math.min(1 - w, rect.xNorm - w / 2)),
+        yNorm: isDragDrawn ? rect.yNorm : Math.max(0.04, Math.min(1 - h, rect.yNorm - h / 2)),
+        widthNorm: w,
+        heightNorm: h,
+        rotationDeg: 0,
+        color: "#fde047",
+        opacity: 0.45
+      };
+    }
+
+    if (!created) return null;
+
+    const next = [...current, created];
+    this.pageOverlays.set(pageId, next);
+    this.selectedOverlayId = created.id;
+    this.toolMode = "select";
+    this.syncEditorUi();
+    this.syncThumbSelectionAndActions();
+    return created;
+  }
+
+  private deleteOverlayById(id: string): void {
+    if (this.selectedPageId === null) return;
+    const pageId = this.selectedPageId;
+    const current = this.pageOverlays.get(pageId) ?? [];
+    if (!current.some((o) => o.id === id)) return;
+
+    this.pushUndoSnapshot(pageId, current);
+    const next = current.filter((o) => o.id !== id);
+    if (next.length === 0) {
+      this.pageOverlays.delete(pageId);
+    } else {
+      this.pageOverlays.set(pageId, next);
+    }
+    if (this.selectedOverlayId === id) {
+      this.selectedOverlayId = null;
+    }
+    this.overlayLayer.stopInlineEdit();
+    this.syncEditorUi();
+    this.syncThumbSelectionAndActions();
+  }
+
+  private clearOverlaysOnCurrentPage(): void {
+    if (this.selectedPageId === null) return;
+    const pageId = this.selectedPageId;
+    const current = this.pageOverlays.get(pageId) ?? [];
+    if (current.length === 0) return;
+
+    this.pushUndoSnapshot(pageId, current);
+    this.pageOverlays.delete(pageId);
+    this.selectedOverlayId = null;
+    this.overlayLayer.stopInlineEdit();
+    this.syncEditorUi();
+    this.syncThumbSelectionAndActions();
+    this.setStatus("Anotações da página atual removidas.", "info");
+  }
+
+  private undoLastOverlayEdit(): void {
+    const entry = this.overlayUndoStack.pop();
+    if (!entry) return;
+
+    this.pendingUndoSnapshot = null;
+    this.overlayLayer.stopInlineEdit();
+
+    if (entry.snapshot.length === 0) {
+      this.pageOverlays.delete(entry.pageId);
+    } else {
+      this.pageOverlays.set(entry.pageId, this.cloneOverlays(entry.snapshot));
+    }
+
+    const idx = this.pages.findIndex((p) => p.id === entry.pageId);
+    if (idx !== -1 && entry.pageId !== this.selectedPageId) {
+      this.selectPageByIndex(idx);
+    } else {
+      this.selectedOverlayId = null;
+      this.syncEditorUi();
+      this.syncThumbSelectionAndActions();
+    }
+    this.setStatus("Última alteração desfeita.", "info");
+  }
+
+  private getCurrentPageOverlays(): PageOverlayItem[] {
+    if (this.selectedPageId === null) return [];
+    return this.pageOverlays.get(this.selectedPageId) ?? [];
+  }
+
+  private syncEditorInspectorOnly(): void {
+    const overlays = this.getCurrentPageOverlays();
+    const selectedItem =
+      overlays.find((o) => o.id === this.selectedOverlayId) ?? null;
+
+    const hintByTool: Record<EditorToolMode, string> = {
+      select:
+        this.currentAcroWidgets.length > 0
+          ? "Modo leitura: clique nos campos azuis do formulário para preencher ou selecione uma ferramenta acima."
+          : "Modo leitura: selecione texto do PDF, pesquise (Ctrl+F) ou escolha uma ferramenta acima para editar.",
+      signature: "Escolha ou desenhe uma assinatura.",
+      text: "Clique ou arraste sobre a folha para posicionar a caixa de texto.",
+      image: "Escolha uma imagem do seu dispositivo.",
+      redact: "Clique ou arraste sobre o trecho que deseja cobrir e substituir.",
+      highlight: "Arraste sobre a região do documento que deseja destacar."
+    };
+
+    this.inspectorBar.update({
+      selectedItem,
+      canUndo: this.overlayUndoStack.length > 0,
+      pageOverlayCount: overlays.length,
+      hintText: hintByTool[this.toolMode]
+    });
+  }
+
+  private syncEditorUi(): void {
+    for (const btn of this.toolButtons) {
+      const t = btn.dataset.editorTool as EditorToolMode;
+      const isCurrent = t === this.toolMode;
+      btn.classList.toggle("is-tool-active", isCurrent);
+      btn.setAttribute("aria-pressed", String(isCurrent));
+      btn.disabled = this.pages.length === 0 || this.isExporting;
+    }
+
+    const placing =
+      this.toolMode === "text" ||
+      this.toolMode === "redact" ||
+      this.toolMode === "highlight";
+    this.overlayLayer.setPlacementMode(placing);
+
+    const activePage = this.pages.find((p) => p.id === this.selectedPageId);
+    this.overlayLayer.setState({
+      items: this.getCurrentPageOverlays(),
+      selectedId: this.selectedOverlayId,
+      pageWidthPt: activePage?.widthPt,
+      pageHeightPt: activePage?.heightPt
+    });
+
+    this.formStatusPill.hidden = this.currentAcroWidgets.length === 0;
+    this.syncEditorInspectorOnly();
   }
 
   private setupObservers(): void {
@@ -736,6 +1249,22 @@ export class PdfReaderStudio {
     this.exportCancelBtn.addEventListener("click", () =>
       this.mergeController.cancel()
     );
+
+    // Editor toolbar tools & image insertion
+    for (const btn of this.toolButtons) {
+      btn.addEventListener("click", () => {
+        const mode = btn.dataset.editorTool as EditorToolMode;
+        this.setToolMode(mode);
+      });
+    }
+
+    this.imageOverlayInput.addEventListener("change", () => {
+      const file = this.imageOverlayInput.files?.[0];
+      this.imageOverlayInput.value = "";
+      if (file) {
+        void this.handleOverlayImageSelected(file);
+      }
+    });
 
     // Thumb list delegated click & drag-and-drop reorder
     this.thumbList.addEventListener("click", (event) => {
@@ -919,19 +1448,12 @@ export class PdfReaderStudio {
 
   private handleKeydown(event: KeyboardEvent): void {
     if (!this.isActive || this.pages.length === 0) return;
-    if (this.passwordDialog.open) return;
+    if (this.passwordDialog.open || this.signatureModal.isOpen()) return;
 
     // Intercept Ctrl+F / Cmd+F inside active reader workspace
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
       this.toggleSearchBar(true);
-      return;
-    }
-
-    if (event.key === "Escape" && this.searchOpen) {
-      event.preventDefault();
-      this.toggleSearchBar(false);
-      this.stage.focus();
       return;
     }
 
@@ -941,7 +1463,32 @@ export class PdfReaderStudio {
       activeEl instanceof HTMLTextAreaElement ||
       activeEl instanceof HTMLSelectElement;
 
+    if (!isTypingInField && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      this.undoLastOverlayEdit();
+      return;
+    }
+
+    if (event.key === "Escape" && this.searchOpen && !isTypingInField) {
+      event.preventDefault();
+      this.toggleSearchBar(false);
+      this.stage.focus();
+      return;
+    }
+
     if (isTypingInField) return;
+
+    if (this.overlayLayer.handleKeyDown(event)) {
+      return;
+    }
+
+    if (event.key === "Escape" && (this.toolMode !== "select" || this.selectedOverlayId !== null)) {
+      event.preventDefault();
+      this.toolMode = "select";
+      this.selectedOverlayId = null;
+      this.syncEditorUi();
+      return;
+    }
 
     if (event.key === "ArrowLeft" || event.key === "PageUp") {
       event.preventDefault();
@@ -1180,10 +1727,13 @@ export class PdfReaderStudio {
     if (!item) return;
 
     this.selectedPageId = item.id;
+    this.selectedOverlayId = null;
+    this.overlayLayer.stopInlineEdit();
     this.session.lastPageIndex = safeIdx;
     this.saveSession();
 
     this.syncControls();
+    this.syncEditorUi();
     this.scrollThumbIntoView(item.id);
     void this.renderSelectedPage();
   }
@@ -1250,7 +1800,21 @@ export class PdfReaderStudio {
   private rotatePage(pageId: number, delta: number): void {
     const item = this.pages.find((p) => p.id === pageId);
     if (!item) return;
+    const oldW = item.widthPt || 595.28;
+    const oldH = item.heightPt || 841.89;
     item.userRotation = normalizeRotation(item.userRotation + delta);
+    item.widthPt = oldH;
+    item.heightPt = oldW;
+
+    const overlays = this.pageOverlays.get(pageId);
+    if (overlays && overlays.length > 0 && (delta === 90 || delta === -90)) {
+      this.pushUndoSnapshot(pageId, overlays);
+      const rotated = overlays.map((ov) =>
+        transformOverlayOnPageRotate(ov, delta, oldW, oldH)
+      );
+      this.pageOverlays.set(pageId, rotated);
+    }
+
     this.thumbRenderKeys.delete(pageId);
 
     const card = this.thumbElements.get(pageId);
@@ -1260,6 +1824,7 @@ export class PdfReaderStudio {
     }
 
     if (this.selectedPageId === pageId) {
+      this.syncEditorUi();
       void this.renderSelectedPage();
     }
   }
@@ -1272,6 +1837,15 @@ export class PdfReaderStudio {
       ...src,
       id: this.nextPageId++
     };
+
+    const srcOverlays = this.pageOverlays.get(pageId);
+    if (srcOverlays && srcOverlays.length > 0) {
+      this.pageOverlays.set(
+        copy.id,
+        srcOverlays.map((ov) => ({ ...ov, id: nextAssetId("ov") }))
+      );
+    }
+
     this.pages.splice(idx + 1, 0, copy);
     this.syncThumbListDom();
     this.syncControls();
@@ -1291,6 +1865,7 @@ export class PdfReaderStudio {
     if (idx === -1) return;
 
     this.pages.splice(idx, 1);
+    this.pageOverlays.delete(pageId);
     const card = this.thumbElements.get(pageId);
     if (card) {
       this.thumbObserver?.unobserve(card);
@@ -1346,6 +1921,17 @@ export class PdfReaderStudio {
     this.sources.clear();
     this.pages = [];
     this.selectedPageId = null;
+    this.pageOverlays.clear();
+    this.assetBuffers.clear();
+    this.overlayUndoStack = [];
+    this.pendingUndoSnapshot = null;
+    this.selectedOverlayId = null;
+    this.formValuesByDoc.clear();
+    this.currentAcroWidgets = [];
+    this.toolMode = "select";
+    this.overlayLayer.stopInlineEdit();
+    this.overlayLayer.setAcroFormState([], {});
+    this.overlayLayer.setState({ items: [], selectedId: null });
 
     for (const card of this.thumbElements.values()) {
       this.thumbObserver?.unobserve(card);
@@ -1583,6 +2169,14 @@ export class PdfReaderStudio {
       this.renderedTextDivs = textLayer.textDivs;
       this.renderedTextStrings = textLayer.textContentItemsStr;
 
+      const widgets = await extractAcroFormWidgets(page, totalRotation);
+      if (myVersion !== this.renderVersion) return;
+      this.currentAcroWidgets = widgets;
+      const docFormValues = this.formValuesByDoc.get(item.sourceDocId) ?? {};
+      this.overlayLayer.setAcroFormState(widgets, docFormValues);
+      this.overlayLayer.setPageDimensions(baseViewport.width, baseViewport.height);
+      this.syncEditorUi();
+
       if (this.pendingStageScrollEdge) {
         const edge = this.pendingStageScrollEdge;
         this.pendingStageScrollEdge = null;
@@ -1731,7 +2325,10 @@ export class PdfReaderStudio {
     if (numEl) {
       const rotBadge =
         item.userRotation !== 0 ? ` · ${item.userRotation}°` : "";
-      numEl.textContent = `Pág. ${String(index + 1).padStart(2, "0")}${rotBadge}`;
+      const editCount = this.pageOverlays.get(item.id)?.length ?? 0;
+      const editBadge =
+        editCount > 0 ? ` · ${editCount} ${editCount === 1 ? "ed." : "eds."}` : "";
+      numEl.textContent = `Pág. ${String(index + 1).padStart(2, "0")}${rotBadge}${editBadge}`;
     }
     if (srcEl) {
       srcEl.textContent =
@@ -1901,10 +2498,21 @@ export class PdfReaderStudio {
     this.reverseOrderBtn.disabled = total < 2 || this.isExporting;
     this.clearBtn.disabled = !hasPages || this.isExporting;
     this.exportBtn.disabled = !hasPages || this.isExporting;
+    this.flattenOutputCheck.disabled = !hasPages || this.isExporting;
+
+    const hasEdits =
+      this.pageOverlays.size > 0 || this.formValuesByDoc.size > 0;
+    const exportBtnSpan = this.exportBtn.querySelector("span");
+    if (exportBtnSpan) {
+      exportBtnSpan.textContent = hasEdits
+        ? "Exportar PDF editado"
+        : "Exportar PDF organizado";
+    }
 
     this.syncSidebarVisibility();
     this.syncZoomSelect();
     this.syncThumbSelectionAndActions();
+    this.syncEditorUi();
   }
 
   // --- Search (Ctrl+F) ---
@@ -2072,23 +2680,61 @@ export class PdfReaderStudio {
       }
     }
 
-    const mergePages: MergePageInput[] = this.pages.map((p) => ({
-      sourceDocId: p.sourceDocId,
-      sourcePageIndex: p.sourcePageNumber - 1,
-      deltaRotation: p.userRotation
-    }));
+    const exportAssetsMap = new Map<string, OverlayAssetInput>();
+
+    const mergePages: MergePageInput[] = this.pages.map((p) => {
+      const pageOvList = this.pageOverlays.get(p.id) ?? [];
+      const exportOverlays: ExportableOverlayItem[] = pageOvList.map((ov) => {
+        if (ov.kind === "signature" || ov.kind === "image") {
+          if (!exportAssetsMap.has(ov.assetId)) {
+            const cached = this.assetBuffers.get(ov.assetId);
+            if (cached) {
+              exportAssetsMap.set(ov.assetId, cached);
+            } else {
+              const converted = dataUrlToAssetBytes(ov.dataUrl);
+              const assetObj: OverlayAssetInput = {
+                assetId: ov.assetId,
+                ...converted
+              };
+              this.assetBuffers.set(ov.assetId, assetObj);
+              exportAssetsMap.set(ov.assetId, assetObj);
+            }
+          }
+          const { dataUrl: _omit, ...rest } = ov;
+          return rest;
+        }
+        return ov;
+      });
+
+      return {
+        sourceDocId: p.sourceDocId,
+        sourcePageIndex: p.sourcePageNumber - 1,
+        deltaRotation: p.userRotation,
+        overlays: exportOverlays.length > 0 ? exportOverlays : undefined
+      };
+    });
+
+    const formValuesObj: Record<number, Record<string, AcroFormFieldValue>> = {};
+    for (const [docId, vals] of this.formValuesByDoc.entries()) {
+      if (usedDocIds.has(docId) && Object.keys(vals).length > 0) {
+        formValuesObj[docId] = vals;
+      }
+    }
 
     const outName = safeFileName(
       this.exportNameInput.value || "documento-organizado"
     );
 
     this.updateExportProgress(0, mergePages.length + activeSources.length, "Preparando exportação...");
-    this.setStatus("Montando PDF organizado em segundo plano...", "info");
+    this.setStatus("Montando PDF em segundo plano...", "info");
 
     try {
       const pdfBuffer = await this.mergeController.merge({
         sources: activeSources,
         pages: mergePages,
+        assets: Array.from(exportAssetsMap.values()),
+        formValuesByDoc: formValuesObj,
+        flattenOutput: this.flattenOutputCheck.checked,
         fileName: outName,
         onProgress: (c, t, m) => this.updateExportProgress(c, t, m)
       });

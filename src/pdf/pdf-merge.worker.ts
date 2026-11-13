@@ -1,4 +1,5 @@
 import type { ReaderWorkerRequest, ReaderWorkerResponse } from "../types";
+import { buildCreatedPdf } from "./pdf-creator-builder";
 import { mergePdfDocuments } from "./pdf-merge-builder";
 
 let cancelled = false;
@@ -33,6 +34,11 @@ self.addEventListener(
               post({ type: "progress", current, total, message });
             },
             isCancelled: () => cancelled
+          },
+          {
+            assets: data.assets,
+            formValuesByDoc: data.formValuesByDoc,
+            flattenOutput: data.flattenOutput
           }
         );
 
@@ -49,7 +55,35 @@ self.addEventListener(
           error instanceof Error ? error.message : "Erro ao exportar o PDF.";
         post({ type: "error", message });
       }
+      return;
+    }
+
+    if (data.type === "create") {
+      cancelled = false;
+      try {
+        const pdfBuffer = await buildCreatedPdf({
+          pages: data.pages,
+          assets: data.assets,
+          fileName: data.fileName,
+          onProgress: (current, total, message) => {
+            post({ type: "progress", current, total, message });
+          },
+          isCancelled: () => cancelled
+        });
+
+        post(
+          {
+            type: "success",
+            pdfBuffer,
+            pageCount: data.pages.length
+          },
+          [pdfBuffer]
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Erro ao gerar o novo PDF.";
+        post({ type: "error", message });
+      }
     }
   }
 );
-

@@ -30,6 +30,7 @@ import {
 } from "./utils/layout";
 import { PdfGenerationController } from "./pdf/pdf-client";
 import { initRootsBackground } from "./rootsAnimation";
+import type { PdfCreatorStudio } from "./creator/pdf-creator-studio";
 import type { PdfReaderStudio } from "./reader/pdf-reader-studio";
 
 const SETTINGS_STORAGE_KEY = "rootpdf-settings";
@@ -39,6 +40,8 @@ const ACTIVE_MODE_STORAGE_KEY = "rootpdf-active-mode";
 let activeMode: AppMode = loadActiveMode();
 let readerStudio: PdfReaderStudio | null = null;
 let readerStudioPromise: Promise<PdfReaderStudio> | null = null;
+let creatorStudio: PdfCreatorStudio | null = null;
+let creatorStudioPromise: Promise<PdfCreatorStudio> | null = null;
 
 let nextId = 1;
 let pasteCounter = 1;
@@ -129,7 +132,20 @@ app.innerHTML = `
             tabindex="-1"
           >
             ${ICONS.bookOpen}
-            <span>Leitor &amp; Organizador</span>
+            <span>Leitor &amp; Editor</span>
+          </button>
+          <button
+            id="tabCreator"
+            class="studio-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="creatorPanel"
+            data-mode="creator"
+            tabindex="-1"
+          >
+            ${ICONS.filePlus}
+            <span>Criar PDF</span>
           </button>
         </div>
       </nav>
@@ -432,6 +448,7 @@ app.innerHTML = `
       </div>
 
       <div id="readerPanel" class="mode-panel" role="tabpanel" aria-labelledby="tabReader" hidden></div>
+      <div id="creatorPanel" class="mode-panel" role="tabpanel" aria-labelledby="tabCreator" hidden></div>
 
       <footer class="app-footer">
         <div class="footer-inner">
@@ -497,14 +514,14 @@ app.innerHTML = `
       </button>
       <span class="eyebrow">Arquitetura &amp; Privacidade</span>
       <h2>Como o RootPDF funciona?</h2>
-      <p>Tudo acontece no seu próprio navegador. Imagens viram PDFs em segundo plano (via <strong>Web Worker</strong> e <strong>OffscreenCanvas</strong>), e você também pode ler, pesquisar e mesclar PDFs existentes localmente com <strong>PDF.js</strong> e <strong>pdf-lib</strong>.</p>
+      <p>Tudo acontece no seu próprio navegador. Imagens viram PDFs em segundo plano (via <strong>Web Worker</strong> e <strong>OffscreenCanvas</strong>), e você também pode ler, assinar, preencher formulários, editar em camadas ou criar novos PDFs localmente com <strong>PDF.js</strong> e <strong>pdf-lib</strong>.</p>
       <div class="dialog-grid">
         <span>01</span>
         <p><strong>Imagem → PDF com Rapidez</strong><br>Arraste múltiplos arquivos, selecione do dispositivo ou pressione <kbd>Ctrl+V</kbd> para colar capturas e montar páginas configuráveis.</p>
         <span>02</span>
-        <p><strong>Leitor &amp; Organizador Integrado</strong><br>Abra PDFs multi-página com busca (<kbd>Ctrl+F</kbd>), seleção de texto, miniaturas, rotação, reordenação e mesclagem entre arquivos.</p>
+        <p><strong>Leitor, Assinatura &amp; Edição</strong><br>Abra PDFs multi-página com busca (<kbd>Ctrl+F</kbd>), assinatura desenhada/enviada/salva localmente, formulários, cobertura e reordenação.</p>
         <span>03</span>
-        <p><strong>Exportação Local Instantânea</strong><br>Gere novos documentos ou PDFs reorganizados diretamente na sua máquina, com privacidade total e zero upload externo.</p>
+        <p><strong>Criar PDF do Zero</strong><br>Monte novos documentos combinando blocos de texto formatado, imagens e assinaturas, com rascunho salvo no navegador.</p>
       </div>
     </div>
   </dialog>
@@ -512,8 +529,10 @@ app.innerHTML = `
 
 const tabConverter = getElement<HTMLButtonElement>("tabConverter");
 const tabReader = getElement<HTMLButtonElement>("tabReader");
+const tabCreator = getElement<HTMLButtonElement>("tabCreator");
 const converterPanel = getElement<HTMLDivElement>("converterPanel");
 const readerPanel = getElement<HTMLDivElement>("readerPanel");
+const creatorPanel = getElement<HTMLDivElement>("creatorPanel");
 const studioTabList = tabConverter.closest<HTMLElement>("[role='tablist']");
 const fileInput = getElement<HTMLInputElement>("fileInput");
 const pasteButton = getElement<HTMLButtonElement>("pasteButton");
@@ -571,7 +590,7 @@ function getElement<T extends HTMLElement>(id: string): T {
 function loadActiveMode(): AppMode {
   try {
     const saved = sessionStorage.getItem(ACTIVE_MODE_STORAGE_KEY);
-    if (saved === "converter" || saved === "reader") {
+    if (saved === "converter" || saved === "reader" || saved === "creator") {
       return saved;
     }
   } catch {
@@ -611,11 +630,38 @@ async function ensureReaderStudio(): Promise<PdfReaderStudio> {
   return readerStudioPromise;
 }
 
+async function ensureCreatorStudio(): Promise<PdfCreatorStudio> {
+  if (creatorStudio) return creatorStudio;
+  if (!creatorStudioPromise) {
+    creatorPanel.innerHTML = `
+      <div class="panel reader-loading-panel" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>Carregando Compositor de PDF...</span>
+      </div>
+    `;
+    creatorStudioPromise = import("./creator/pdf-creator-studio")
+      .then(({ PdfCreatorStudio: StudioClass }) => {
+        const instance = new StudioClass(creatorPanel, {
+          onOpenPdfInReader: (file) => {
+            void switchMode("reader", [file]);
+          }
+        });
+        creatorStudio = instance;
+        return instance;
+      })
+      .catch((error) => {
+        creatorStudioPromise = null;
+        throw error;
+      });
+  }
+  return creatorStudioPromise;
+}
+
 async function switchMode(
   mode: AppMode,
   initialPdfFiles?: File[]
 ): Promise<void> {
-  if (mode === "reader" && previewDialog.open) {
+  if (mode !== "converter" && previewDialog.open) {
     closePreviewModal();
   }
 
@@ -623,39 +669,70 @@ async function switchMode(
   saveActiveMode(mode);
 
   const isConverter = mode === "converter";
+  const isReader = mode === "reader";
+  const isCreator = mode === "creator";
+
   tabConverter.classList.toggle("is-active", isConverter);
   tabConverter.setAttribute("aria-selected", String(isConverter));
   tabConverter.tabIndex = isConverter ? 0 : -1;
 
-  tabReader.classList.toggle("is-active", !isConverter);
-  tabReader.setAttribute("aria-selected", String(!isConverter));
-  tabReader.tabIndex = isConverter ? -1 : 0;
+  tabReader.classList.toggle("is-active", isReader);
+  tabReader.setAttribute("aria-selected", String(isReader));
+  tabReader.tabIndex = isReader ? 0 : -1;
+
+  tabCreator.classList.toggle("is-active", isCreator);
+  tabCreator.setAttribute("aria-selected", String(isCreator));
+  tabCreator.tabIndex = isCreator ? 0 : -1;
 
   converterPanel.hidden = !isConverter;
-  readerPanel.hidden = isConverter;
+  readerPanel.hidden = !isReader;
+  creatorPanel.hidden = !isCreator;
+
+  readerStudio?.setActive(isReader);
+  creatorStudio?.setActive(isCreator);
 
   if (isConverter) {
-    readerStudio?.setActive(false);
     return;
   }
 
-  try {
-    const studio = await ensureReaderStudio();
-    if (activeMode !== "reader") {
-      studio.setActive(false);
-      return;
+  if (isReader) {
+    try {
+      const studio = await ensureReaderStudio();
+      if (activeMode !== "reader") {
+        studio.setActive(false);
+        return;
+      }
+      studio.setActive(true);
+      if (initialPdfFiles && initialPdfFiles.length > 0) {
+        await studio.openExternalFiles(initialPdfFiles);
+      }
+    } catch (error) {
+      console.error("Erro ao inicializar o Leitor & Editor:", error);
+      readerPanel.innerHTML = `
+        <div class="panel reader-loading-panel is-error" role="alert">
+          <span>Não foi possível carregar o módulo de leitura de PDF. Recarregue a página e tente novamente.</span>
+        </div>
+      `;
     }
-    studio.setActive(true);
-    if (initialPdfFiles && initialPdfFiles.length > 0) {
-      await studio.openExternalFiles(initialPdfFiles);
+    return;
+  }
+
+  if (isCreator) {
+    try {
+      const studio = await ensureCreatorStudio();
+      if (activeMode !== "creator") {
+        studio.setActive(false);
+        return;
+      }
+      studio.setActive(true);
+    } catch (error) {
+      console.error("Erro ao inicializar o Compositor de PDF:", error);
+      creatorPanel.innerHTML = `
+        <div class="panel reader-loading-panel is-error" role="alert">
+          <span>Não foi possível carregar o módulo de criação de PDF. Recarregue a página e tente novamente.</span>
+        </div>
+      `;
     }
-  } catch (error) {
-    console.error("Erro ao inicializar o Leitor & Organizador:", error);
-    readerPanel.innerHTML = `
-      <div class="panel reader-loading-panel is-error" role="alert">
-        <span>Não foi possível carregar o módulo de leitura de PDF. Recarregue a página e tente novamente.</span>
-      </div>
-    `;
   }
 }
 
@@ -1552,8 +1629,8 @@ async function handlePasteButtonClick(): Promise<void> {
 applyTheme();
 syncSettingsControls();
 syncDom();
-if (activeMode === "reader") {
-  void switchMode("reader");
+if (activeMode === "reader" || activeMode === "creator") {
+  void switchMode(activeMode);
 }
 
 tabConverter.addEventListener("click", () => {
@@ -1564,8 +1641,12 @@ tabReader.addEventListener("click", () => {
   void switchMode("reader");
 });
 
+tabCreator.addEventListener("click", () => {
+  void switchMode("creator");
+});
+
 studioTabList?.addEventListener("keydown", (event: KeyboardEvent) => {
-  const tabs = [tabConverter, tabReader];
+  const tabs = [tabConverter, tabReader, tabCreator];
   const currentIndex = tabs.indexOf(document.activeElement as HTMLButtonElement);
   if (currentIndex === -1) return;
 
@@ -1584,7 +1665,8 @@ studioTabList?.addEventListener("keydown", (event: KeyboardEvent) => {
     event.preventDefault();
     const targetTab = tabs[nextIndex];
     targetTab.focus();
-    void switchMode(nextIndex === 0 ? "converter" : "reader");
+    const modes: AppMode[] = ["converter", "reader", "creator"];
+    void switchMode(modes[nextIndex] ?? "converter");
   }
 });
 
