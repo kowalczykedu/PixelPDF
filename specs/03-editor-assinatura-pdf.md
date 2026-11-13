@@ -19,14 +19,14 @@ Expandir o **RootPDF** com ferramentas 100% client-side para **assinar PDFs**, *
 
 ## Requisitos
 
-- [ ] Todo processamento, armazenamento de assinaturas/rascunhos e gravação do PDF final ocorre 100% localmente no navegador.
-- [ ] **Assinatura visual:** criar assinatura (desenho à mão livre, imagem ou texto estilizado), posicionar/redimensionar/rotacionar sobre qualquer página e achatar/gravar no PDF via `pdf-lib`.
-- [ ] **Biblioteca local de assinaturas:** salvar assinaturas reutilizáveis em `localStorage` com listagem visual e exclusão individual ou completa.
-- [ ] **Edição em camadas sobre PDF existente:** inserir blocos de texto (fonte, tamanho, cor), inserir imagens, aplicar marca-texto/formas e usar a ferramenta **Cobrir / Substituir trecho** (tarja configurável + novo texto sobreposto).
-- [ ] **Formulários AcroForm (quando existirem no PDF):** detectar campos editáveis de texto/checkbox e permitir preenchimento antes de exportar.
-- [ ] **Criação de PDF do zero (Texto + Imagens):** modo/compositor para criar páginas com blocos de texto formatado e imagens posicionáveis, com opção de rascunho local e exportação em PDF.
-- [ ] Garantir precisão de coordenadas entre a prévia em tela (viewport/zoom do leitor) e as coordenadas reais em pontos PDF (`pdf-lib`), seguindo a mesma disciplina de `src/utils/layout.ts`.
-- [ ] Seguir o design system Rosé Pine, Space Mono, ícones SVG, acessibilidade WCAG 2.2 AA (incluindo manipulação por teclado dos elementos inseridos) e revisão de `.agents/rules/frontend-review.md`.
+- [x] Todo processamento, armazenamento de assinaturas/rascunhos e gravação do PDF final ocorre 100% localmente no navegador.
+- [x] **Assinatura visual:** criar assinatura (desenho à mão livre, imagem ou texto estilizado), posicionar/redimensionar/rotacionar sobre qualquer página e achatar/gravar no PDF via `pdf-lib`.
+- [x] **Biblioteca local de assinaturas:** salvar assinaturas reutilizáveis em `localStorage` com listagem visual e exclusão individual ou completa.
+- [x] **Edição em camadas sobre PDF existente:** inserir blocos de texto (fonte, tamanho, cor), inserir imagens, aplicar marca-texto/formas e usar a ferramenta **Cobrir / Substituir trecho** (tarja configurável + novo texto sobreposto).
+- [x] **Formulários AcroForm (quando existirem no PDF):** detectar campos editáveis de texto/checkbox e permitir preenchimento antes de exportar.
+- [x] **Criação de PDF do zero (Texto + Imagens):** modo/compositor para criar páginas com blocos de texto formatado e imagens posicionáveis, com opção de rascunho local e exportação em PDF.
+- [x] Garantir precisão de coordenadas entre a prévia em tela (viewport/zoom do leitor) e as coordenadas reais em pontos PDF (`pdf-lib`), seguindo a mesma disciplina de `src/utils/layout.ts`.
+- [x] Seguir o design system Rosé Pine, Space Mono, ícones SVG, acessibilidade WCAG 2.2 AA (incluindo manipulação por teclado dos elementos inseridos) e revisão de `.agents/rules/frontend-review.md`.
 
 ## Fora de Escopo
 
@@ -42,7 +42,7 @@ Expandir o **RootPDF** com ferramentas 100% client-side para **assinar PDFs**, *
 
 ## Critérios de Aceite
 
-- [ ] `npm run build` (`tsc -b && vite build`) passa sem erros.
+- [x] `npm run build` (`tsc -b && vite build`) passa sem erros.
 - [ ] Assinatura desenhada/importada e blocos de texto/tarja gravam exatamente na posição, escala e página exibidas na prévia (inclusive em páginas rotacionadas ou tamanhos variados).
 - [ ] Assinaturas salvas persistem em `localStorage` entre recarregamentos e podem ser removidas pelo usuário.
 - [ ] PDF criado do zero com textos + imagens e PDFs editados/assinados abrem corretamente em visualizadores externos e no próprio leitor do RootPDF.

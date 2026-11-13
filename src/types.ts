@@ -3,7 +3,7 @@ export type PageSize = "a4" | "a5" | "letter" | "legal" | "image";
 export type Orientation = "auto" | "portrait" | "landscape";
 export type Quality = "high" | "balanced" | "compact";
 export type Theme = "rose-pine";
-export type AppMode = "converter" | "reader";
+export type AppMode = "converter" | "reader" | "creator";
 export type ReaderZoomMode = "fit-width" | "fit-page" | "custom";
 export type SortMode =
   | "manual"
@@ -149,22 +149,210 @@ export interface MergeSourceInput {
   bytes: ArrayBuffer;
 }
 
+export type EditorToolMode =
+  | "select"
+  | "signature"
+  | "text"
+  | "image"
+  | "redact"
+  | "highlight";
+
+export type EditorFontFamily = "helvetica" | "times" | "courier";
+export type EditorTextAlign = "left" | "center" | "right";
+export type SignatureKind = "draw" | "upload" | "type";
+
+export interface SavedSignature {
+  id: string;
+  label: string;
+  kind: SignatureKind;
+  /** PNG data URL with preserved transparency */
+  dataUrl: string;
+  aspectRatio: number;
+  createdAt: number;
+}
+
+export interface OverlayBase {
+  id: string;
+  /** Normalized viewer coordinates [0..1] in current page orientation */
+  xNorm: number;
+  yNorm: number;
+  widthNorm: number;
+  heightNorm: number;
+  /** Clockwise visual tilt in degrees */
+  rotationDeg: number;
+}
+
+export interface SignatureOverlayItem extends OverlayBase {
+  kind: "signature";
+  assetId: string;
+  label: string;
+  dataUrl: string;
+  opacity: number;
+}
+
+export interface ImageOverlayItem extends OverlayBase {
+  kind: "image";
+  assetId: string;
+  fileName: string;
+  dataUrl: string;
+  opacity: number;
+}
+
+export interface TextOverlayItem extends OverlayBase {
+  kind: "text";
+  text: string;
+  fontFamily: EditorFontFamily;
+  fontSizePt: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  align: EditorTextAlign;
+  backgroundColor: string | null;
+}
+
+export interface RedactOverlayItem extends OverlayBase {
+  kind: "redact";
+  coverColor: string;
+  replacementText: string;
+  textColor: string;
+  fontFamily: EditorFontFamily;
+  fontSizePt: number;
+  bold: boolean;
+  italic: boolean;
+  align: EditorTextAlign;
+}
+
+export interface HighlightOverlayItem extends OverlayBase {
+  kind: "highlight";
+  color: string;
+  opacity: number;
+}
+
+export type PageOverlayItem =
+  | SignatureOverlayItem
+  | ImageOverlayItem
+  | TextOverlayItem
+  | RedactOverlayItem
+  | HighlightOverlayItem;
+
+export type ExportableOverlayItem =
+  | Omit<SignatureOverlayItem, "dataUrl">
+  | Omit<ImageOverlayItem, "dataUrl">
+  | TextOverlayItem
+  | RedactOverlayItem
+  | HighlightOverlayItem;
+
+export interface OverlayAssetInput {
+  assetId: string;
+  mimeType: "image/png" | "image/jpeg";
+  bytes: ArrayBuffer;
+}
+
+export type AcroFormFieldValue = string | boolean;
+export type AcroFormFieldType = "text" | "checkbox" | "radio" | "select";
+
+export interface AcroFormWidgetInfo {
+  widgetId: string;
+  fieldName: string;
+  fieldType: AcroFormFieldType;
+  xNorm: number;
+  yNorm: number;
+  widthNorm: number;
+  heightNorm: number;
+  multiline: boolean;
+  maxLen: number | null;
+  align: EditorTextAlign;
+  fontSizePt: number;
+  textColor: string;
+  options: Array<{ exportValue: string; displayValue: string }>;
+  exportValue: string;
+  defaultValue: AcroFormFieldValue;
+  readOnly: boolean;
+}
+
+export type CreatorBlock =
+  | {
+      id: string;
+      kind: "text";
+      xNorm: number;
+      yNorm: number;
+      widthNorm: number;
+      heightNorm: number;
+      rotationDeg: number;
+      text: string;
+      fontFamily: EditorFontFamily;
+      fontSizePt: number;
+      color: string;
+      bold: boolean;
+      italic: boolean;
+      align: EditorTextAlign;
+      backgroundColor: string | null;
+    }
+  | {
+      id: string;
+      kind: "image";
+      xNorm: number;
+      yNorm: number;
+      widthNorm: number;
+      heightNorm: number;
+      rotationDeg: number;
+      assetId: string;
+      fileName: string;
+      dataUrl: string;
+      opacity: number;
+    };
+
+export type CreatorPageSize = keyof typeof PAGE_SIZES;
+
+export interface CreatorPageDoc {
+  id: string;
+  pageSize: CreatorPageSize;
+  orientation: Exclude<Orientation, "auto">;
+  backgroundColor: string;
+  blocks: CreatorBlock[];
+}
+
+export interface CreatePdfPageInput {
+  pageSize: CreatorPageSize;
+  orientation: Exclude<Orientation, "auto">;
+  backgroundColor: string;
+  blocks: Array<
+    | Extract<CreatorBlock, { kind: "text" }>
+    | Omit<Extract<CreatorBlock, { kind: "image" }>, "dataUrl">
+  >;
+}
+
+export interface CreatePdfWorkerRequest {
+  type: "create";
+  pages: CreatePdfPageInput[];
+  assets: OverlayAssetInput[];
+  fileName: string;
+}
+
 export interface MergePageInput {
   sourceDocId: number;
   /** 0-based page index in the source PDF */
   sourcePageIndex: number;
   /** Additional clockwise rotation applied by user in degrees */
   deltaRotation: number;
+  /** Layered edits/signatures placed on this page instance */
+  overlays?: ExportableOverlayItem[];
 }
 
 export interface MergeWorkerRequest {
   type: "merge";
   sources: MergeSourceInput[];
   pages: MergePageInput[];
+  assets?: OverlayAssetInput[];
+  formValuesByDoc?: Record<number, Record<string, AcroFormFieldValue>>;
+  flattenOutput?: boolean;
   fileName: string;
 }
 
-export type ReaderWorkerRequest = MergeWorkerRequest | WorkerCancelRequest;
+export type ReaderWorkerRequest =
+  | MergeWorkerRequest
+  | CreatePdfWorkerRequest
+  | WorkerCancelRequest;
 
 export interface MergeWorkerProgressMessage {
   type: "progress";

@@ -1,19 +1,34 @@
 import type {
+  AcroFormFieldValue,
+  CreatePdfPageInput,
+  CreatePdfWorkerRequest,
   MergePageInput,
   MergeSourceInput,
+  MergeWorkerRequest,
+  OverlayAssetInput,
   ReaderWorkerResponse
 } from "../types";
 
 export interface MergePdfOptions {
   sources: MergeSourceInput[];
   pages: MergePageInput[];
+  assets?: OverlayAssetInput[];
+  formValuesByDoc?: Record<number, Record<string, AcroFormFieldValue>>;
+  flattenOutput?: boolean;
+  fileName: string;
+  onProgress: (current: number, total: number, message: string) => void;
+}
+
+export interface CreatePdfOptions {
+  pages: CreatePdfPageInput[];
+  assets: OverlayAssetInput[];
   fileName: string;
   onProgress: (current: number, total: number, message: string) => void;
 }
 
 /**
- * Coordinates PDF merging/exporting in a background Web Worker, cloning source
- * ArrayBuffers before transfer so the open reader retains ownership of its documents.
+ * Coordinates PDF merging/editing/creation in a background Web Worker, cloning
+ * ArrayBuffers before transfer so the UI retains ownership of open assets.
  */
 export class PdfMergeController {
   private worker: Worker | null = null;
@@ -38,24 +53,94 @@ export class PdfMergeController {
   }
 
   public async merge(options: MergePdfOptions): Promise<ArrayBuffer> {
-    const { sources, pages, fileName, onProgress } = options;
+    const {
+      sources,
+      pages,
+      assets = [],
+      formValuesByDoc,
+      flattenOutput,
+      fileName,
+      onProgress
+    } = options;
     this.cancelled = false;
 
     if (typeof Worker !== "undefined") {
-      return this.runInWorker(sources, pages, fileName, onProgress);
+      const clonedSources: MergeSourceInput[] = sources.map((src) => ({
+        docId: src.docId,
+        fileName: src.fileName,
+        bytes: src.bytes.slice(0)
+      }));
+      const clonedAssets: OverlayAssetInput[] = assets.map((asset) => ({
+        assetId: asset.assetId,
+        mimeType: asset.mimeType,
+        bytes: asset.bytes.slice(0)
+      }));
+
+      const transferables: Transferable[] = [
+        ...clonedSources.map((src) => src.bytes),
+        ...clonedAssets.map((asset) => asset.bytes)
+      ];
+
+      const request: MergeWorkerRequest = {
+        type: "merge",
+        sources: clonedSources,
+        pages,
+        assets: clonedAssets,
+        formValuesByDoc,
+        flattenOutput,
+        fileName
+      };
+
+      return this.runWorkerTask(request, transferables, onProgress);
     }
 
     const { mergePdfDocuments } = await import("./pdf-merge-builder");
-    return mergePdfDocuments(sources, pages, fileName, {
+    return mergePdfDocuments(
+      sources,
+      pages,
+      fileName,
+      {
+        onProgress,
+        isCancelled: () => this.cancelled
+      },
+      { assets, formValuesByDoc, flattenOutput }
+    );
+  }
+
+  public async create(options: CreatePdfOptions): Promise<ArrayBuffer> {
+    const { pages, assets, fileName, onProgress } = options;
+    this.cancelled = false;
+
+    if (typeof Worker !== "undefined") {
+      const clonedAssets: OverlayAssetInput[] = assets.map((asset) => ({
+        assetId: asset.assetId,
+        mimeType: asset.mimeType,
+        bytes: asset.bytes.slice(0)
+      }));
+      const transferables: Transferable[] = clonedAssets.map((a) => a.bytes);
+      const request: CreatePdfWorkerRequest = {
+        type: "create",
+        pages,
+        assets: clonedAssets,
+        fileName
+      };
+
+      return this.runWorkerTask(request, transferables, onProgress);
+    }
+
+    const { buildCreatedPdf } = await import("./pdf-creator-builder");
+    return buildCreatedPdf({
+      pages,
+      assets,
+      fileName,
       onProgress,
       isCancelled: () => this.cancelled
     });
   }
 
-  private runInWorker(
-    sources: MergeSourceInput[],
-    pages: MergePageInput[],
-    fileName: string,
+  private runWorkerTask(
+    request: MergeWorkerRequest | CreatePdfWorkerRequest,
+    transferables: Transferable[],
     onProgress: (current: number, total: number, message: string) => void
   ): Promise<ArrayBuffer> {
     return new Promise<ArrayBuffer>((resolve, reject) => {
@@ -88,24 +173,7 @@ export class PdfMergeController {
           );
         };
 
-        const clonedSources: MergeSourceInput[] = sources.map((src) => ({
-          docId: src.docId,
-          fileName: src.fileName,
-          bytes: src.bytes.slice(0)
-        }));
-        const transferables: Transferable[] = clonedSources.map(
-          (src) => src.bytes
-        );
-
-        worker.postMessage(
-          {
-            type: "merge",
-            sources: clonedSources,
-            pages,
-            fileName
-          },
-          transferables
-        );
+        worker.postMessage(request, transferables);
       } catch (err) {
         this.cleanupWorker();
         reject(
@@ -125,4 +193,3 @@ export class PdfMergeController {
     }
   }
 }
-
