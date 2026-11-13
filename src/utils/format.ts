@@ -41,6 +41,10 @@ export function isPngFile(fileName: string, mimeType: string): boolean {
   return mimeType === "image/png" || getExtension(fileName) === ".png";
 }
 
+export function isPdfUploadFile(file: File): boolean {
+  return file.type === "application/pdf" || getExtension(file.name) === ".pdf";
+}
+
 export function safeFileName(name: string): string {
   return (name.trim() || "meu-documento")
     .replace(/[\\/:*?"<>|]/g, "-")
